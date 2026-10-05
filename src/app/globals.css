@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/*
+  Tokens de diseño de Azul Clarito (los mismos colores y tipografías del sitio
+  principal). Cambiar un valor aquí lo cambia en toda la tienda.
+*/
+@theme {
+  --color-navy: #0b2a5b;
+  --color-celeste: #bfeaff;
+  --color-aqua: #00c7f2;
+  --color-blush: #ff9db8;
+  --color-sun: #ffc629;
+  --color-sand: #f6d9a8;
+  --color-coral: #ff5b6b;
+  --color-paper: #fcfeff;
+  --color-ink: #16324f;
+
+  --font-display: "Quicksand Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Nunito Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-soft: 0 18px 44px -18px rgb(11 42 91 / 0.28);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    color: var(--color-navy);
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 3px solid var(--color-aqua);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
