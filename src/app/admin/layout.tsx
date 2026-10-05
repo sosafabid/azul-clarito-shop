@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { AdminShell } from "@/components/admin/AdminShell";
-import { isDevPreviewSession, requireStaff } from "@/server/auth";
 
 export const metadata: Metadata = {
   title: { default: "Administración", template: "%s · Administración" },
@@ -8,19 +6,10 @@ export const metadata: Metadata = {
 };
 
 /**
- * Entrada del panel. La autorización se hace AQUÍ, en el servidor, antes de
- * renderizar nada. Sin permiso → 404.
- *
- * Ojo: este layout protege las PÁGINAS. Las Server Actions y los Route
- * Handlers administrativos deben llamar a `requireStaff()` / `requirePermission()`
- * por su cuenta (ver src/server/auth/guards.ts).
+ * Layout común de TODO /admin. No protege nada por sí solo: la autorización
+ * está en `(panel)/layout.tsx` (páginas) y en cada Server Action. El login vive
+ * fuera de `(panel)` para poder abrirse sin sesión.
  */
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const session = await requireStaff();
-
-  return (
-    <AdminShell role={session.role} devPreview={isDevPreviewSession(session)}>
-      {children}
-    </AdminShell>
-  );
+export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
+  return children;
 }

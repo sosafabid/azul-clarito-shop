@@ -5,12 +5,12 @@ import { routes } from "@/config/routes";
 type AdminShellProps = {
   children: React.ReactNode;
   role: string;
-  /** Verdadero cuando se está usando la sesión falsa de desarrollo. */
-  devPreview: boolean;
+  email: string;
+  logoutAction: () => Promise<void>;
 };
 
 /** Estructura visual del panel (solo UI: la autorización ocurre en el servidor). */
-export function AdminShell({ children, role, devPreview }: AdminShellProps) {
+export function AdminShell({ children, role, email, logoutAction }: AdminShellProps) {
   return (
     <div className="flex min-h-dvh flex-col bg-celeste/25 md:flex-row">
       <aside className="border-b border-celeste bg-paper md:w-64 md:shrink-0 md:border-b-0 md:border-r">
@@ -41,16 +41,18 @@ export function AdminShell({ children, role, devPreview }: AdminShellProps) {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-celeste bg-paper px-5 py-3 text-sm sm:px-8">
           <span className="text-ink/70">
-            Rol: <strong className="text-navy">{role}</strong>
+            {email} · <strong className="text-navy">{role}</strong>
           </span>
-          {devPreview && (
-            <span className="rounded-full bg-sun/50 px-3 py-1 text-xs font-bold text-navy">
-              Vista previa de desarrollo — sin autenticación
-            </span>
-          )}
-          <Link href={routes.home} className="font-semibold text-navy underline underline-offset-4">
-            Ver tienda
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link href={routes.home} className="font-semibold text-navy underline underline-offset-4">
+              Ver tienda
+            </Link>
+            <form action={logoutAction}>
+              <button type="submit" className="font-semibold text-navy underline underline-offset-4">
+                Cerrar sesión
+              </button>
+            </form>
+          </div>
         </div>
         <main id="contenido" className="flex-1 p-5 sm:p-8">
           {children}

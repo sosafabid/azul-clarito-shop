@@ -1,35 +1,33 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
 import { requireEnv } from "@/server/env";
+import { createDatabase, type Database } from "./client";
 import * as schema from "./schema";
 
 /**
- * Cliente de base de datos (Neon + Drizzle).
+ * Acceso a la base de datos de la aplicación (PostgreSQL en Neon + Drizzle).
  *
- * - Es PEREZOSO: no se conecta al importar este archivo, sino la primera vez
- *   que se llama a `getDb()`. Así `next build` funciona sin `DATABASE_URL`.
- * - Solo puede importarse desde código de servidor (`server-only`).
- *
- * LIMITACIÓN A TENER EN CUENTA: el driver `neon-http` NO soporta
- * `db.transaction()` interactivas. Para operaciones atómicas hay dos caminos:
- *   1) una sola sentencia SQL condicionada (p. ej. reservar stock con
- *      `UPDATE ... WHERE available_stock >= n`), o
- *   2) `db.batch([...])`, que ejecuta varias sentencias de forma atómica.
- * Si más adelante hace falta una transacción interactiva, se añade un segundo
- * cliente con `drizzle-orm/neon-serverless` (WebSocket).
+ * - Usa `DATABASE_URL` (la conexión con pooling de Neon). `DATABASE_URL_UNPOOLED`
+ *   es SOLO para migraciones (Drizzle Kit, ver `drizzle.config.ts`).
+ * - Driver `@neondatabase/serverless` por HTTP: recomendado por Neon para
+ *   Vercel/Next.js. Cada consulta es una petición HTTP; no mantiene conexiones
+ *   abiertas, así que el hot reload de desarrollo no puede "filtrar" conexiones.
+ *   Aun así se guarda la instancia en `globalThis` para crearla una sola vez.
+ * - Es PEREZOSO: no se conecta al importar, así `next build` funciona sin
+ *   `DATABASE_URL`. Solo se puede importar desde código de servidor.
+ * - Este driver NO soporta `db.transaction()` interactivas. Para operaciones
+ *   atómicas se usa `db.batch([...])` (varias sentencias en una transacción) o
+ *   una sola sentencia SQL condicionada.
  */
-let cached: ReturnType<typeof createDb> | undefined;
+const globalForDb = globalThis as unknown as { __azulClaritoDb?: Database };
 
-function createDb() {
-  const sql = neon(requireEnv("DATABASE_URL"));
-  return drizzle(sql, { schema });
+export function isDatabaseConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL);
 }
 
-export function getDb() {
-  cached ??= createDb();
-  return cached;
+export function getDb(): Database {
+  globalForDb.__azulClaritoDb ??= createDatabase(requireEnv("DATABASE_URL"));
+  return globalForDb.__azulClaritoDb;
 }
 
-export type Database = ReturnType<typeof getDb>;
+export type { Database } from "./client";
 export { schema };

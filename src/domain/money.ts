@@ -47,3 +47,38 @@ export function formatMoney(amount: number, currency: CurrencyCode = DEFAULT_CUR
   const body = decimals > 0 ? `${grouped},${decimalPart}` : grouped;
   return `${negative ? "-" : ""}${symbol}${body}`;
 }
+
+export type ParsedMoney = { ok: true; amount: number } | { ok: false; error: string };
+
+/**
+ * Interpreta lo que una persona escribe en un campo de dinero y lo convierte
+ * al entero que se guarda (ver arriba).
+ *
+ * Es estricto a propósito para evitar errores caros ("12.000" NO puede leerse
+ * como 12 colones):
+ *   CRC: "12000", "12.000", "₡12.000"      → 12000   ("12,5" o "12.5" se rechazan)
+ *   USD: "12", "12.50", "12,5", "1.234,50" → centavos
+ */
+export function parseMoneyInput(raw: string, currency: CurrencyCode): ParsedMoney {
+  const text = raw.replace(/[₡$\s]/g, "");
+  if (text === "") return { ok: false, error: "Ingresá un monto." };
+
+  if (currency === "CRC") {
+    if (/^\d+$/.test(text)) return { ok: true, amount: Number(text) };
+    if (/^\d{1,3}(\.\d{3})+$/.test(text)) return { ok: true, amount: Number(text.replace(/\./g, "")) };
+    return { ok: false, error: "Usá solo números enteros, sin decimales (por ejemplo 12000 o 12.000)." };
+  }
+
+  let normalized: string | null = null;
+  if (/^\d+([.,]\d{1,2})?$/.test(text)) normalized = text.replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(text)) normalized = text.replace(/\./g, "").replace(",", ".");
+  if (normalized === null) {
+    return { ok: false, error: "Monto inválido. Ejemplos: 12, 12.50 o 1.234,50." };
+  }
+  return { ok: true, amount: toMinorUnits(Number(normalized), currency) };
+}
+
+/** Convierte el texto de moneda que viene de la base de datos a un `CurrencyCode` seguro. */
+export function toCurrency(value: string): CurrencyCode {
+  return isSupportedCurrency(value) ? value : DEFAULT_CURRENCY;
+}

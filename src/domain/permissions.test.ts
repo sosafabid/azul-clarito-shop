@@ -34,6 +34,12 @@ describe("permisos", () => {
     expect(can("STAFF", "users:manage-roles")).toBe(false);
   });
 
+  it("eliminar productos definitivamente es solo de SUPER_ADMIN", () => {
+    expect(can("SUPER_ADMIN", "products:delete")).toBe(true);
+    expect(can("STAFF", "products:delete")).toBe(false);
+    expect(can("CUSTOMER", "products:delete")).toBe(false);
+  });
+
   it("SUPER_ADMIN puede todo lo sensible", () => {
     expect(can("SUPER_ADMIN", "orders:refund")).toBe(true);
     expect(can("SUPER_ADMIN", "users:manage-roles")).toBe(true);

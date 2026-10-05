@@ -38,3 +38,31 @@ export type PublicProduct = {
   isNew: boolean;
   isLimitedEdition: boolean;
 };
+
+/**
+ * Disponibilidad PÚBLICA: solo un estado. Las cantidades (disponible, reservado,
+ * vendido) son internas: "vendido" revelaría las ventas.
+ */
+export type ProductAvailability = "in_stock" | "low_stock" | "out_of_stock";
+
+export type PublicProductListItem = PublicProduct & {
+  categoryName: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  availability: ProductAvailability;
+};
+
+/** Variante visible al público: opciones, precio y un ESTADO de disponibilidad (nunca cantidades ni costo). */
+export type PublicVariantItem = {
+  id: string;
+  name: string | null;
+  options: Record<string, string>;
+  /** Precio propio de la variante; `null` = el del producto. */
+  price: number | null;
+  availability: ProductAvailability;
+};
+
+export type PublicProductDetail = PublicProductListItem & {
+  images: PublicProductImage[];
+  variants: PublicVariantItem[];
+};

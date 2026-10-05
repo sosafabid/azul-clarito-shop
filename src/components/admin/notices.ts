@@ -1,0 +1,20 @@
+/** Avisos que se muestran después de una acción del panel (viajan en `?saved=`). */
+export const PRODUCT_NOTICES: Record<string, { tone: "success" | "warning" | "error"; text: string }> = {
+  created: { tone: "success", text: "Producto creado. Podés seguir completándolo acá (imágenes, variantes)." },
+  updated: { tone: "success", text: "Cambios guardados." },
+  published: { tone: "success", text: "Producto publicado: ya aparece en la tienda." },
+  hidden: { tone: "success", text: "Producto oculto: ya no aparece en la tienda." },
+  archived: { tone: "success", text: "Producto archivado. Lo encontrás en el filtro “Archivados”." },
+  restored: { tone: "success", text: "Producto restaurado. Quedó oculto: publicalo cuando quieras." },
+  deleted: { tone: "success", text: "Producto eliminado definitivamente." },
+  "image-added": { tone: "success", text: "Imagen(es) agregada(s)." },
+  "image-removed": { tone: "success", text: "Imagen eliminada." },
+  "image-primary": { tone: "success", text: "Imagen principal actualizada." },
+  "image-moved": { tone: "success", text: "Orden actualizado." },
+  "image-updated": { tone: "success", text: "Texto alternativo guardado." },
+  "variant-added": { tone: "success", text: "Variante agregada." },
+  "variant-updated": { tone: "success", text: "Variante actualizada." },
+  "variant-deleted": { tone: "success", text: "Variante eliminada." },
+  "variant-delete-blocked": { tone: "warning", text: "Esa variante tiene historial de ventas: no se puede eliminar, pero sí desactivar." },
+  "action-failed": { tone: "error", text: "No se pudo completar la acción (el producto pudo haber cambiado). Recargá e intentá de nuevo." },
+};

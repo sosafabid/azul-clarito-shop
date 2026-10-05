@@ -21,10 +21,4 @@ export const serverConfig = {
       return optionalEnv("ADMIN_NOTIFY_EMAIL");
     },
   },
-  auth: {
-    /** Solo en desarrollo local: permite ver /admin sin iniciar sesión. */
-    get devAdminPreview() {
-      return process.env.NODE_ENV !== "production" && process.env.DEV_ADMIN_PREVIEW === "true";
-    },
-  },
 } as const;

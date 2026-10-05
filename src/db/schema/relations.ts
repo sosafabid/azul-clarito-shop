@@ -6,6 +6,7 @@ import { inventory } from "./inventory";
 import { orderItems, orders } from "./orders";
 import { payments } from "./payments";
 import { shippingMethods, shippingRates } from "./shipping";
+import { sessions } from "./sessions";
 import { users } from "./users";
 
 // Relaciones para el "relational query builder" de Drizzle (db.query.*).
@@ -16,6 +17,11 @@ export const usersRelations = relations(users, ({ many }) => ({
   addresses: many(addresses),
   orders: many(orders),
   auditLogs: many(auditLogs),
+  sessions: many(sessions),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, { fields: [sessions.userId], references: [users.id] }),
 }));
 
 export const addressesRelations = relations(addresses, ({ one }) => ({

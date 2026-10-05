@@ -10,12 +10,16 @@ import type { UserRole } from "./roles";
 export const PERMISSIONS = {
   "products:read": ["SUPER_ADMIN", "STAFF"],
   "products:write": ["SUPER_ADMIN", "STAFF"],
+  // Eliminación DEFINITIVA de productos: solo SUPER_ADMIN (política de la tienda).
+  "products:delete": ["SUPER_ADMIN"],
   "inventory:read": ["SUPER_ADMIN", "STAFF"],
   "inventory:write": ["SUPER_ADMIN", "STAFF"],
   "orders:read": ["SUPER_ADMIN", "STAFF"],
   "orders:fulfill": ["SUPER_ADMIN", "STAFF"],
   "orders:refund": ["SUPER_ADMIN"],
   "customers:read": ["SUPER_ADMIN", "STAFF"],
+  // Información económica interna (costos, utilidad, márgenes). NUNCA pública.
+  "costs:read": ["SUPER_ADMIN", "STAFF"],
   "users:manage-roles": ["SUPER_ADMIN"],
   "audit:read": ["SUPER_ADMIN"],
   "settings:write": ["SUPER_ADMIN"],
