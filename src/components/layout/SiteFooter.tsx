@@ -40,6 +40,11 @@ export function SiteFooter() {
                 Carrito
               </Link>
             </li>
+            <li>
+              <Link href={routes.account} className="text-paper/80 hover:text-paper hover:underline">
+                Mi cuenta
+              </Link>
+            </li>
           </ul>
         </nav>
 
@@ -76,9 +81,17 @@ export function SiteFooter() {
       </div>
 
       <div className="border-t border-paper/15">
-        <p className="mx-auto max-w-6xl px-5 py-5 text-sm text-paper/60 sm:px-8">
-          © {year} Azul Clarito · Limón, Costa Rica
-        </p>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-5 text-sm text-paper/60 sm:px-8">
+          <p>© {year} Azul Clarito · Limón, Costa Rica</p>
+          <nav aria-label="Legal" className="flex gap-5">
+            <Link href={routes.terms} className="hover:text-paper hover:underline">
+              Términos y condiciones
+            </Link>
+            <Link href={routes.privacy} className="hover:text-paper hover:underline">
+              Política de Privacidad
+            </Link>
+          </nav>
+        </div>
       </div>
     </footer>
   );

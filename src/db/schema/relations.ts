@@ -6,6 +6,7 @@ import { inventory } from "./inventory";
 import { orderItems, orders } from "./orders";
 import { payments } from "./payments";
 import { shippingMethods, shippingRates } from "./shipping";
+import { userConsents } from "./consents";
 import { sessions } from "./sessions";
 import { users } from "./users";
 
@@ -18,6 +19,11 @@ export const usersRelations = relations(users, ({ many }) => ({
   orders: many(orders),
   auditLogs: many(auditLogs),
   sessions: many(sessions),
+  consents: many(userConsents),
+}));
+
+export const userConsentsRelations = relations(userConsents, ({ one }) => ({
+  user: one(users, { fields: [userConsents.userId], references: [users.id] }),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({

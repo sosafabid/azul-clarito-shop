@@ -36,3 +36,13 @@ export async function requirePermission(permission: Permission): Promise<AuthSes
 export function requireStaff(): Promise<AuthSession> {
   return requireRole(STAFF_ROLES);
 }
+
+/**
+ * Cualquier persona con sesión iniciada (clienta o equipo). Sin sesión → login de
+ * clientas. Se usa en la cuenta (`/account`), nunca en el panel.
+ */
+export async function requireUser(): Promise<AuthSession> {
+  const session = await getSession();
+  if (!session) redirect(routes.accountLogin);
+  return session;
+}

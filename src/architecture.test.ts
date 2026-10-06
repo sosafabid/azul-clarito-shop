@@ -42,8 +42,10 @@ describe("frontera pública / privada", () => {
     "@/server/services/catalog/taxonomy",
     "@/server/services/inventory",
     "@/server/services/images",
-    "@/server/auth",
-    "@/server/actions",
+    // acciones del panel (las de sesión y cuenta de clientas SÍ las usa la tienda):
+    "@/server/actions/products",
+    "@/server/actions/product-images",
+    "@/server/actions/product-variants",
     "@/components/admin",
     "@/db/schema", // las páginas públicas no tocan tablas directamente
   ];
@@ -74,21 +76,24 @@ describe("frontera pública / privada", () => {
 });
 
 describe("autorización en el servidor", () => {
-  it("cada Server Action exige permiso ANTES de tocar la base de datos", () => {
-    // login/logout son públicas por naturaleza (se prueban aparte, abajo).
-    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/auth.ts"));
-    expect(files.length).toBeGreaterThanOrEqual(3);
+  it("cada Server Action exige sesión/permiso ANTES de tocar la base de datos", () => {
+    // login / registro / logout son públicas por naturaleza (se prueban aparte, abajo).
+    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts"));
+    expect(files.length).toBeGreaterThanOrEqual(4);
 
     for (const file of files) {
       const source = read(file);
       expect(source.trimStart().startsWith('"use server"')).toBe(true);
       const chunks = source.split(/export async function /).slice(1);
       expect(chunks.length).toBeGreaterThan(0);
+      const isAccount = rel(file).endsWith("/actions/account.ts");
       for (const chunk of chunks) {
         const name = chunk.slice(0, chunk.indexOf("("));
-        const guard = chunk.indexOf("await requirePermission(");
+        // Panel: permiso concreto. Cuenta de clientas: sesión iniciada (opera solo sobre SU cuenta).
+        const guardCall = isAccount ? "await requireUser(" : "await requirePermission(";
+        const guard = chunk.indexOf(guardCall);
         const db = chunk.search(/getDb\(|isDatabaseConfigured\(/);
-        expect(guard, `${rel(file)}: ${name} no llama a requirePermission`).toBeGreaterThanOrEqual(0);
+        expect(guard, `${rel(file)}: ${name} no llama a ${guardCall}`).toBeGreaterThanOrEqual(0);
         expect(guard, `${rel(file)}: ${name} toca la base de datos antes del guard`).toBeLessThan(db === -1 ? Infinity : db);
       }
     }
@@ -119,11 +124,13 @@ describe("autenticación real", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("las acciones de login/logout no aceptan roles ni permisos desde el formulario", () => {
-    const source = stripComments(read(join(SRC, "server/actions/auth.ts")));
-    expect(source).not.toMatch(/formData\.get\(["']role["']\)/);
-    expect(source).toMatch(/burnPasswordCheck/); // tiempo equilibrado cuando el correo no existe
-    expect(source).toMatch(/MAX_FAILED_LOGIN_ATTEMPTS/); // bloqueo por intentos
+  it("el login (equipo y clientas) no acepta roles desde el formulario y protege contra fuerza bruta", () => {
+    const actions = stripComments(read(join(SRC, "server/actions/auth.ts")));
+    expect(actions).not.toMatch(/formData\.get\(["']role["']\)/);
+    const login = stripComments(read(join(SRC, "server/services/auth/login.ts")));
+    expect(login).toMatch(/burnPasswordCheck/); // tiempo equilibrado cuando el correo no existe
+    expect(login).toMatch(/MAX_FAILED_LOGIN_ATTEMPTS/); // bloqueo por intentos
+    expect(actions).toMatch(/staffOnly: true/); // el panel solo admite al equipo
   });
 
   it("la cookie de sesión es HttpOnly, SameSite y Secure en producción", () => {
@@ -148,6 +155,46 @@ describe("autenticación real", () => {
   it("la eliminación definitiva (producto y variante) exige el permiso products:delete", () => {
     expect(read(join(SRC, "server/actions/products.ts"))).toMatch(/deleteProductAction[\s\S]*?requirePermission\("products:delete"\)/);
     expect(read(join(SRC, "server/actions/product-variants.ts"))).toMatch(/deleteVariantAction[\s\S]*?requirePermission\("products:delete"\)/);
+  });
+});
+
+describe("cuentas de clientas y consentimiento", () => {
+  it("el registro SIEMPRE crea una cuenta CUSTOMER (nunca recibe el rol del formulario)", () => {
+    const service = stripComments(read(join(SRC, "server/services/accounts.ts")));
+    expect(service).toMatch(/role: "CUSTOMER"/);
+    expect(service).not.toMatch(/data\.role|input\.role/);
+    const form = stripComments(read(join(SRC, "domain/customer-form.ts")));
+    expect(form).not.toMatch(/\brole\b/);
+  });
+
+  it("los consentimientos obligatorios se exigen en el servidor, no solo en el navegador", () => {
+    const form = stripComments(read(join(SRC, "domain/customer-form.ts")));
+    expect(form).toMatch(/acceptTerms/);
+    expect(form).toMatch(/acceptPrivacy/);
+    // y el servicio guarda cada aceptación como evento con la versión del texto legal
+    const service = stripComments(read(join(SRC, "server/services/accounts.ts")));
+    expect(service).toMatch(/type: "TERMS"/);
+    expect(service).toMatch(/type: "PRIVACY"/);
+  });
+
+  it("las acciones de cuenta operan SOLO sobre la sesión: ninguna recibe un id de usuario del formulario", () => {
+    const source = stripComments(read(join(SRC, "server/actions/account.ts")));
+    expect(source).not.toMatch(/formData\.get\(["'](userId|id|user_id)["']\)/);
+    expect(source).toMatch(/session\.userId/);
+  });
+
+  it("el código público nunca usa los guards del panel", () => {
+    const publicFiles = all.filter((p) =>
+      ["src/app/(store)/", "src/components/shop/", "src/components/ui/", "src/components/layout/", "src/components/home/", "src/components/account/"].some((prefix) => rel(p).startsWith(prefix)),
+    );
+    const publicWithGuards = publicFiles.filter((f) => /requirePermission|requireStaff|requireRole/.test(stripComments(read(f))));
+    expect(publicWithGuards.map(rel)).toEqual([]);
+  });
+
+  it("la auditoría de la cuenta no guarda datos personales (solo qué campos cambiaron)", () => {
+    const service = stripComments(read(join(SRC, "server/services/accounts.ts")));
+    expect(service).toMatch(/fields/);
+    expect(service).not.toMatch(/metadata:\s*\{[^}]*(email|phone|name)\s*:/);
   });
 });
 

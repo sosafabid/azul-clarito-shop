@@ -47,6 +47,12 @@ export const getSession = cache(async (): Promise<AuthSession | null> => {
   return { userId: row.userId, email: row.email, name: row.name, role: row.role };
 });
 
+/** Hash de la sesión ACTUAL (para poder conservarla cuando se cierran las demás). */
+export async function getCurrentTokenHash(): Promise<string | null> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  return token ? hashToken(token) : null;
+}
+
 /** Crea la sesión (fila + cookie). Solo se llama después de verificar la contraseña. */
 export async function startSession(userId: string): Promise<void> {
   const token = randomBytes(32).toString("base64url");

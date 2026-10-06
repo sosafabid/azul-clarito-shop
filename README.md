@@ -69,7 +69,10 @@ Abrí <http://localhost:3000>. Rutas disponibles:
 | `/shop` | **Lee productos ACTIVOS desde PostgreSQL** (si no hay ninguno, "Próximamente") |
 | `/shop/[slug]` | **Ficha de producto desde PostgreSQL**: nombre, descripción, precio, imagen (si existe) y disponibilidad. Slug inexistente o inactivo → 404 |
 | `/cart`, `/checkout` | "Próximamente" |
-| `/account`, `/account/orders` | "Próximamente" |
+| `/account/register`, `/account/login` | **Crear cuenta** (nombre, correo, teléfono opcional, contraseña y consentimientos) e **ingresar** |
+| `/account` | **Mi cuenta** (requiere sesión): editar datos, ver y cambiar consentimientos (con historial), cambiar contraseña y eliminar la cuenta |
+| `/account/orders` | "Próximamente" (requiere sesión) |
+| `/terminos`, `/privacidad` | **Textos legales provisionales** (versionados; ver "Cuentas de clientas y consentimiento") |
 | `/admin/login` | Inicio de sesión del equipo (correo + contraseña) |
 | `/admin/products` | Listado con **búsqueda**, **filtros** (Todos / Activos / Ocultos / Archivados) y acciones por estado: publicar, ocultar, archivar, restaurar |
 | `/admin/products/new` | Crear producto: datos, categoría/colección (existentes o nuevas), precio, costo, moneda, stock inicial, estado inicial, destacado/nuevo/edición limitada e imágenes |
@@ -281,6 +284,28 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
 - **Auditoría** (`audit_logs`): creación, edición (con lista de campos), cambios de precio/costo/moneda/stock (antes y después),
   publicar, ocultar, archivar, restaurar, eliminación, imágenes, variantes e inicios de sesión.
 
+## Cuentas de clientas y consentimiento
+
+- **Registro:** nombre, correo, teléfono (opcional), contraseña (mín. 12 caracteres) y consentimientos. Al terminar queda con la sesión iniciada.
+  La cuenta nace **siempre como `CUSTOMER`**: el rol no viaja en el formulario ni se puede pedir desde él.
+- **Consentimientos:** Términos y Privacidad son **obligatorios y se exigen en el servidor** (no basta la casilla del navegador); las casillas vienen
+  **desmarcadas**. Comunicaciones comerciales es **opcional**. Cada aceptación o retiro es un **evento nuevo** en `user_consents` con la
+  **versión del texto**, la fecha y el origen (`registration` / `account`): el historial no se edita ni se pisa. La persona lo ve y puede retirar
+  el permiso de marketing en cualquier momento desde `/account`.
+- **Versiones legales** en `src/config/legal.ts`. Si cambiás el contenido de `/terminos` o `/privacidad`, cambiá la versión (AAAA-MM-DD).
+- **⚠️ Revisión legal pendiente.** Los textos son una **base** (referencian la Ley N.° 8968 y la PRODHAB) y **no son asesoría legal**. Mientras
+  `legalConfig.reviewed` sea `false`, muestran un aviso de "texto provisional" y llevan `noindex`. Antes del lanzamiento: que una persona abogada
+  los revise, completar `legalConfig.controller` (nombre/razón social, cédula, dirección del responsable), subir la versión y pasar `reviewed` a `true`.
+  También conviene consultar si la base de datos de clientas debe inscribirse ante la PRODHAB.
+- **Derechos sobre los datos:** acceso (se ve en `/account`), rectificación (editar nombre y teléfono), revocación (marketing) y eliminación.
+  Eliminar la cuenta borra la persona, sus sesiones, direcciones y consentimientos; **los pedidos se conservan sin vínculo a la cuenta** y
+  se quita su correo del registro de auditoría. Las cuentas del equipo no se eliminan desde ahí.
+- **La auditoría de la cuenta no guarda datos personales:** solo qué campos cambiaron, nunca sus valores.
+- **Contraseña:** hash scrypt con sal; al cambiarla se cierran las demás sesiones. El login (equipo y clientas) comparte la misma protección:
+  mensaje genérico, tiempo equilibrado y bloqueo de 15 minutos tras 5 intentos fallidos.
+- **Límites conocidos:** (1) el registro avisa si un correo ya existe (sin verificación por email no se puede evitar enumerar cuentas); (2) hay un
+  freno global de 20 registros cada 10 minutos y un campo trampa contra bots, pero **no hay límite por IP**; (3) el correo no se verifica todavía.
+
 ## Seguridad de dependencias
 
 `npm audit --omit=dev` (lo que corre en producción) → **0 vulnerabilidades**.
@@ -293,7 +318,9 @@ cuando los autores publiquen sus actualizaciones.
 
 ## Qué NO está implementado todavía
 
-- Cuentas y registro de clientas (la autenticación actual es solo para el equipo)
+- **Recuperar contraseña olvidada** y **verificar el correo**: ambos necesitan enviar emails y todavía no hay servicio de correo (`RESEND_API_KEY`). Hasta entonces, una clienta que olvide su contraseña no puede recuperarla sola.
+- Descargar una copia de los datos personales (derecho de acceso en archivo)
+- Revisión legal de `/terminos` y `/privacidad` (ver abajo)
 - Gestión de usuarios del equipo desde el panel (hoy se crean con `npm run admin:create`)
 - Importación de inventario real, subida de imágenes (almacenamiento/CDN), variantes en el panel y categorías en el panel
 - Carrito y checkout reales

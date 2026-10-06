@@ -1,95 +1,88 @@
 "use server";
 
-import { eq, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { routes } from "@/config/routes";
+import { legalConfig } from "@/config/legal";
 import { getDb, isDatabaseConfigured } from "@/db";
-import { users } from "@/db/schema";
-import {
-  LOCK_MINUTES,
-  MAX_FAILED_LOGIN_ATTEMPTS,
-  MAX_PASSWORD_LENGTH,
-  isLocked,
-  isPlausibleEmail,
-  normalizeEmail,
-} from "@/domain/auth";
-import { isStaffRole } from "@/domain/roles";
-import { burnPasswordCheck, verifyPassword } from "@/server/auth/password";
-import { endSession, startSession } from "@/server/auth/session";
-import { auditInsert } from "@/server/services/audit";
+import { parseRegistrationForm } from "@/domain/customer-form";
+import { endSession, startSession } from "@/server/auth";
+import { attemptLogin } from "@/server/services/auth/login";
+import { registerCustomer } from "@/server/services/accounts";
 
 /**
- * INICIO Y CIERRE DE SESIÓN.
+ * ACCIONES PÚBLICAS DE SESIÓN: ingresar (equipo y clientas), registrarse y salir.
  *
- * Estas dos acciones son las ÚNICAS públicas del panel (por naturaleza no
- * pueden exigir sesión). No reciben ningún rol ni permiso desde el formulario:
- * el rol siempre se lee de la base de datos.
- *
- * Protecciones: mensaje de error genérico (no revela si el correo existe),
- * tiempo equilibrado con un hash ficticio, bloqueo temporal tras varios
- * intentos fallidos, y solo el equipo (STAFF / SUPER_ADMIN) puede entrar.
+ * Son las ÚNICAS acciones que por naturaleza no exigen sesión. Ninguna recibe un
+ * rol ni un permiso desde el formulario: el rol de una cuenta nueva es SIEMPRE
+ * CUSTOMER y el de una existente se lee de la base de datos.
  */
 export type LoginState = { message: string } | null;
+export type RegisterState = { errors: Record<string, string>; message?: string } | null;
 
 const GENERIC_FAILURE: LoginState = { message: "Correo o contraseña incorrectos, o la cuenta está bloqueada temporalmente." };
+const NO_DB = "La base de datos no está configurada (falta DATABASE_URL).";
 
+/** Ingreso al PANEL: solo STAFF y SUPER_ADMIN. */
 export async function loginAction(_previous: LoginState, formData: FormData): Promise<LoginState> {
-  if (!isDatabaseConfigured()) return { message: "La base de datos no está configurada (falta DATABASE_URL)." };
-
-  const email = normalizeEmail(String(formData.get("email") ?? ""));
-  const password = String(formData.get("password") ?? "");
-  if (!isPlausibleEmail(email) || password.length === 0 || password.length > MAX_PASSWORD_LENGTH) return GENERIC_FAILURE;
-
-  const db = getDb();
-  const [user] = await db
-    .select({
-      id: users.id,
-      role: users.role,
-      isActive: users.isActive,
-      passwordHash: users.passwordHash,
-      lockedUntil: users.lockedUntil,
-    })
-    .from(users)
-    .where(sql`lower(${users.email}) = ${email}`)
-    .limit(1);
-
-  if (!user || !user.passwordHash || !user.isActive || isLocked(user.lockedUntil)) {
-    await burnPasswordCheck(password); // mismo tiempo de respuesta que un intento real
-    return GENERIC_FAILURE;
-  }
-
-  const valid = await verifyPassword(password, user.passwordHash);
-
-  if (!valid || !isStaffRole(user.role)) {
-    // Incremento atómico en la base (no leer-y-escribir) para que intentos simultáneos cuenten todos.
-    const [updated] = await db
-      .update(users)
-      .set({
-        failedLoginAttempts: sql`${users.failedLoginAttempts} + 1`,
-        lockedUntil: sql`case when ${users.failedLoginAttempts} + 1 >= ${MAX_FAILED_LOGIN_ATTEMPTS} then now() + make_interval(mins => ${LOCK_MINUTES}) else ${users.lockedUntil} end`,
-      })
-      .where(eq(users.id, user.id))
-      .returning({ attempts: users.failedLoginAttempts });
-
-    if (updated && updated.attempts === MAX_FAILED_LOGIN_ATTEMPTS) {
-      await auditInsert(db, { actorUserId: null, label: "sistema" }, [
-        { action: "auth.locked", entityType: "user", entityId: user.id, metadata: { attempts: updated.attempts, minutes: LOCK_MINUTES } },
-      ]);
-    }
-    return GENERIC_FAILURE;
-  }
-
-  await db.batch([
-    db.update(users).set({ failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() }).where(eq(users.id, user.id)),
-    auditInsert(db, { actorUserId: user.id, label: email }, [
-      { action: "auth.login", entityType: "user", entityId: user.id, metadata: {} },
-    ]),
-  ]);
-  await startSession(user.id);
+  if (!isDatabaseConfigured()) return { message: NO_DB };
+  const result = await attemptLogin(getDb(), {
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    staffOnly: true,
+  });
+  if (!result.ok) return GENERIC_FAILURE;
+  await startSession(result.userId);
   redirect(routes.admin);
 }
 
 export async function logoutAction(): Promise<void> {
   await endSession();
   redirect(routes.adminLogin);
+}
+
+/** Ingreso a la CUENTA de la tienda (cualquier persona con cuenta activa). */
+export async function customerLoginAction(_previous: LoginState, formData: FormData): Promise<LoginState> {
+  if (!isDatabaseConfigured()) return { message: NO_DB };
+  const result = await attemptLogin(getDb(), {
+    email: String(formData.get("email") ?? ""),
+    password: String(formData.get("password") ?? ""),
+    staffOnly: false,
+  });
+  if (!result.ok) return GENERIC_FAILURE;
+  await startSession(result.userId);
+  redirect(routes.account);
+}
+
+export async function customerLogoutAction(): Promise<void> {
+  await endSession();
+  redirect(routes.home);
+}
+
+/**
+ * Registro de una clienta nueva. Los consentimientos obligatorios se exigen en el
+ * servidor (`parseRegistrationForm`) y cada uno se guarda como evento con la
+ * versión del texto legal vigente.
+ */
+export async function registerAction(_previous: RegisterState, formData: FormData): Promise<RegisterState> {
+  if (!isDatabaseConfigured()) return { errors: {}, message: NO_DB };
+
+  // Campo trampa para bots: una persona real no lo ve ni lo llena.
+  if (String(formData.get("website") ?? "") !== "") return { errors: {}, message: "No pudimos crear la cuenta. Intentá de nuevo." };
+
+  const record: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) if (typeof value === "string") record[key] = value;
+
+  const parsed = parseRegistrationForm(record);
+  if (!parsed.ok) return { errors: parsed.errors };
+
+  const result = await registerCustomer(getDb(), parsed.data, { terms: legalConfig.termsVersion, privacy: legalConfig.privacyVersion });
+  if (!result.ok) {
+    if (result.code === "email_taken") {
+      return { errors: { email: "Ya existe una cuenta con ese correo. Ingresá con tu contraseña." }, message: result.message };
+    }
+    return { errors: {}, message: result.message };
+  }
+
+  await startSession(result.userId);
+  redirect(`${routes.account}?bienvenida=1`);
 }
