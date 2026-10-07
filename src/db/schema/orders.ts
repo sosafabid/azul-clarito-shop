@@ -48,6 +48,12 @@ export const orders = pgTable(
     }),
     /** Copia del nombre del método al momento de la compra. */
     shippingMethodName: text("shipping_method_name"),
+    /**
+     * COSTO REAL del envío pagado por Azul Clarito al courier (INTERNO: nunca se muestra a la clienta).
+     * Opcional: lo registrará el panel cuando exista el módulo de fulfillment. La diferencia con
+     * `shipping_total` (lo que pagó la clienta) permite analizar la rentabilidad real del envío.
+     */
+    shippingActualCost: money("shipping_actual_cost"),
     /** Snapshots: la dirección queda congelada en el pedido. */
     shippingAddress: jsonb("shipping_address").$type<AddressSnapshot>().notNull(),
     billingAddress: jsonb("billing_address").$type<AddressSnapshot>(),
@@ -80,6 +86,7 @@ export const orders = pgTable(
       "orders_amounts_non_negative",
       sql`${t.subtotal} >= 0 AND ${t.shippingTotal} >= 0 AND ${t.taxTotal} >= 0 AND ${t.total} >= 0`,
     ),
+    check("orders_shipping_actual_cost_non_negative", sql`${t.shippingActualCost} IS NULL OR ${t.shippingActualCost} >= 0`),
     check("orders_total_matches_parts", sql`${t.total} = ${t.subtotal} + ${t.shippingTotal} + ${t.taxTotal}`),
     index("orders_user_idx").on(t.userId),
     index("orders_status_idx").on(t.status),

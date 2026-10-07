@@ -303,6 +303,15 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
   listando sus cantones); sin zona = todo el país. Rango de monto de pedido y **umbral de envío gratis** opcionales. Gana la tarifa más específica (a igual especificidad, la más barata); las zonas ignoran
   mayúsculas y tildes. **No hay ningún monto ni zona precargados**: se ingresan desde el panel (colones; sin conversión). Si falta tarifa para el destino: *"El envío para este destino todavía no está configurado."*
   (nunca "no disponible"). El costo real del courier es interno y no se muestra a la clienta.
+- **Envío nacional editable desde el Admin.** La configuración inicial es **un dato de la base** (migración `0008`), no una constante del código: método "Envío nacional" (entrega a domicilio, activo), tarifa
+  base de **₡4.000 en colones para todo Costa Rica** y la descripción para la clienta. `/admin/shipping` tiene una pantalla simple —nombre, descripción, tarifa, moneda y estado— que solo cambia
+  SUPER_ADMIN (el equipo la ve). Guardar vale **de inmediato** para los nuevos cálculos del checkout: no hace falta tocar código, variables de entorno ni redesplegar. El formulario no recibe ids ni país
+  (el servidor decide qué método y tarifa edita; por ahora siempre Costa Rica). Si se desactiva el método, el checkout dice *"No hay un método de envío disponible por el momento."*, no muestra ninguna tarifa
+  y no deja continuar (`canProceed = false`). Una tarifa en otra moneda que la de los productos no se aplica (no hay conversión). Las zonas (GAM, Limón…) viven en "Zonas y tarifas (avanzado)"
+  y tienen prioridad sobre la tarifa base. **Auditoría** (`audit_logs`, con quién y cuándo y el antes → después): `shipping.method_created`, `shipping.method_updated`, `shipping.method_activated`,
+  `shipping.method_deactivated`, `shipping.rate_created`, `shipping.rate_changed` y `shipping.rate_updated`. **Historial:** el envío cobrado queda congelado en `orders.pricing_snapshot` (y en `shipping_total`) al
+  crear la orden; cambiar la tarifa después no altera pedidos anteriores. **Costo real del envío** (lo que paga Azul Clarito al courier): la columna interna `orders.shipping_actual_cost` ya existe (opcional, nunca se
+  muestra a la clienta); cuando exista el módulo de fulfillment se registrará ahí y la rentabilidad será `shipping_total − shipping_actual_cost`.
 - **Total** = subtotal + impuesto + envío (con impuesto incluido: subtotal + envío). Mientras falte la dirección o el método, el envío **no muestra ningún valor** y el total queda en "—".
   Si hay productos no disponibles o sin stock suficiente, el checkout no calcula total.
 - **Un solo punto de cálculo:** `calculateCheckoutTotals()` (`src/server/services/checkout/totals.ts`, sobre las reglas puras de `src/domain/checkout.ts`). La URL del checkout solo trae

@@ -1,5 +1,5 @@
 import { isUuid } from "./ids";
-import { parseMoneyInput } from "./money";
+import { isSupportedCurrency, parseMoneyInput, type CurrencyCode } from "./money";
 import { SHIPPING_TYPES, STORE_COUNTRY, type ShippingType } from "./shipping";
 import { slugify } from "./slug";
 import { TAX_ROUNDING_MODES, TAX_RULE_SCOPES, TAX_TREATMENTS, parsePercentToBps, type TaxRounding, type TaxRuleScope, type TaxTreatment } from "./tax";
@@ -94,6 +94,8 @@ export type ParsedShippingRate = {
   city: string | null;
   postalCode: string | null;
   price: number;
+  /** Moneda de la tarifa. Debe coincidir con la de los productos (colones): no hay conversión. */
+  currency: CurrencyCode;
   minOrderAmount: number | null;
   maxOrderAmount: number | null;
   freeShippingThreshold: number | null;
@@ -106,13 +108,16 @@ export function parseShippingRateForm(input: Input): FormResult<ParsedShippingRa
   const zone = (key: string, max: number) => text(input, key).replace(/\s+/g, " ").slice(0, max) || null;
   const zoneName = zone("zoneName", 60);
   // Los importes están en la moneda base de la tienda (colones): no hay conversión de moneda.
+  const currencyRaw = (text(input, "currency") || "CRC").toUpperCase();
+  const currency: CurrencyCode = isSupportedCurrency(currencyRaw) ? currencyRaw : "CRC";
+  if (!isSupportedCurrency(currencyRaw)) errors.currency = "Elegí una moneda válida.";
   const money = (key: string, required: boolean, label: string): number | null => {
     const raw = text(input, key);
     if (raw === "") {
       if (required) errors[key] = `${label}: obligatorio.`;
       return null;
     }
-    const parsed = parseMoneyInput(raw, "CRC");
+    const parsed = parseMoneyInput(raw, currency);
     if (!parsed.ok) errors[key] = `${label}: ${parsed.error}`;
     return parsed.ok ? parsed.amount : null;
   };
@@ -124,6 +129,30 @@ export function parseShippingRateForm(input: Input): FormResult<ParsedShippingRa
   return done(errors, () => ({
     // El país NO viene del formulario: por ahora solo se envía dentro de Costa Rica.
     countryCode: STORE_COUNTRY, zoneName, stateProvince: zone("province", 300), city: zone("city", 400), postalCode: zone("postalCode", 100),
-    price: price ?? 0, minOrderAmount: min, maxOrderAmount: max, freeShippingThreshold: free, active: input.active === "on",
+    price: price ?? 0, currency, minOrderAmount: min, maxOrderAmount: max, freeShippingThreshold: free, active: input.active === "on",
   }));
+}
+
+// ── Envío nacional (formulario simple del panel) ──
+export type ParsedNationalShipping = { name: string; description: string | null; price: number; currency: CurrencyCode; active: boolean };
+
+/** Nombre, descripción, tarifa, moneda y estado del "Envío nacional". El país NO se edita: por ahora solo Costa Rica. */
+export function parseNationalShippingForm(input: Input): FormResult<ParsedNationalShipping> {
+  const errors: Record<string, string> = {};
+  const name = text(input, "name");
+  if (name.length < 2 || name.length > 60) errors.name = "El nombre debe tener entre 2 y 60 caracteres.";
+  const description = text(input, "description");
+  if (description.length > 300) errors.description = "La descripción admite hasta 300 caracteres.";
+  const currencyRaw = (text(input, "currency") || "CRC").toUpperCase();
+  const currencyOk = isSupportedCurrency(currencyRaw);
+  if (!currencyOk) errors.currency = "Elegí una moneda válida.";
+  let price = 0;
+  const rawPrice = text(input, "price");
+  if (rawPrice === "") errors.price = "La tarifa es obligatoria.";
+  else if (currencyOk) {
+    const parsed = parseMoneyInput(rawPrice, currencyRaw);
+    if (!parsed.ok) errors.price = `Tarifa: ${parsed.error}`;
+    else price = parsed.amount;
+  }
+  return done(errors, () => ({ name, description: description || null, price, currency: (currencyOk ? currencyRaw : "CRC") as CurrencyCode, active: input.active === "on" }));
 }

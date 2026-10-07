@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "./settings-form";
+import { parseNationalShippingForm, parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "./settings-form";
 import { parseDestination } from "./shipping";
 
 describe("formulario de impuesto", () => {
@@ -68,4 +68,32 @@ describe("destino que llega por la URL (no confiable): solo Costa Rica", () => {
     for (const provincia of [undefined, "", "Texas", "Cundinamarca"]) expect(parseDestination({ provincia })).toEqual({ destination: null, countryRejected: false });
   });
   it("recorta y limpia caracteres de control", () => expect(parseDestination({ provincia: "Limón", ciudad: "a\u0000b" + "x".repeat(200) }).destination?.city?.length).toBeLessThanOrEqual(80));
+});
+
+describe("moneda de la tarifa", () => {
+  it("por defecto colones; se puede elegir otra moneda soportada", () => {
+    expect(parseShippingRateForm({ price: "4000" })).toMatchObject({ ok: true, data: { currency: "CRC", price: 4000 } });
+    expect(parseShippingRateForm({ price: "4.50", currency: "usd" })).toMatchObject({ ok: true, data: { currency: "USD", price: 450 } });
+    expect(parseShippingRateForm({ price: "4000", currency: "EUR" }).ok).toBe(false);
+  });
+});
+
+describe("formulario simple del Envío nacional", () => {
+  const ok = { name: "Envío nacional", description: "Texto", price: "4000", currency: "CRC", active: "on" };
+  it("válido", () => expect(parseNationalShippingForm(ok)).toEqual({ ok: true, data: { name: "Envío nacional", description: "Texto", price: 4000, currency: "CRC", active: true } }));
+  it("la tarifa acepta '3500', '3.500' y '4 500'", () => {
+    for (const [raw, value] of [["3500", 3500], ["3.500", 3500], ["4500", 4500]] as const) expect(parseNationalShippingForm({ ...ok, price: raw })).toMatchObject({ ok: true, data: { price: value } });
+  });
+  it("la tarifa tiene que ser un número válido y no negativo", () => {
+    for (const price of ["", "abc", "-5", "1e3", "4000,5x"]) expect(parseNationalShippingForm({ ...ok, price }).ok).toBe(false);
+  });
+  it("0 es una tarifa válida (envío sin costo)", () => expect(parseNationalShippingForm({ ...ok, price: "0" })).toMatchObject({ ok: true, data: { price: 0 } }));
+  it("nombre, descripción y moneda", () => {
+    expect(parseNationalShippingForm({ ...ok, name: "A" }).ok).toBe(false);
+    expect(parseNationalShippingForm({ ...ok, description: "x".repeat(301) }).ok).toBe(false);
+    expect(parseNationalShippingForm({ ...ok, currency: "XXX" }).ok).toBe(false);
+    expect(parseNationalShippingForm({ ...ok, description: "" })).toMatchObject({ ok: true, data: { description: null } });
+  });
+  it("sin marcar 'activo' queda desactivado", () => expect(parseNationalShippingForm({ ...ok, active: undefined })).toMatchObject({ ok: true, data: { active: false } }));
+  it("el país no forma parte del formulario (por ahora solo Costa Rica)", () => expect(JSON.stringify(parseNationalShippingForm({ ...ok, country: "US" }))).not.toContain("US"));
 });

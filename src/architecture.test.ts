@@ -305,15 +305,18 @@ describe("checkout, impuestos y envíos", () => {
     }
   });
 
-  it("no se precargan impuestos ni tarifas: ninguna migración inserta en tax_* ni shipping_*", () => {
+  it("las migraciones no precargan impuestos; solo la configuración inicial del envío nacional, de forma condicional", () => {
     const dir = join(process.cwd(), "drizzle");
-    for (const file of walk(dir).filter((f) => f.endsWith(".sql"))) {
-      expect(read(file), rel(file)).not.toMatch(/INSERT\s+INTO\s+"?(tax_rates|tax_rules|shipping_rates)"?/i);
-    }
-    // Lo único que se precarga es el MÉTODO conceptual "Envío nacional", sin tarifas, y solo si no existe ningún método.
-    const defaults = walk(dir).filter((f) => f.endsWith(".sql") && /INSERT\s+INTO\s+"?shipping_methods"?/i.test(read(f)));
-    expect(defaults.length).toBe(1);
-    expect(read(defaults[0])).toMatch(/WHERE NOT EXISTS \(SELECT 1 FROM "shipping_methods"\)/);
+    const sqlFiles = walk(dir).filter((f) => f.endsWith(".sql"));
+    for (const file of sqlFiles) expect(read(file), rel(file)).not.toMatch(/INSERT\s+INTO\s+"?(tax_rates|tax_rules)"?/i);
+    // Métodos: solo se crean si no existe ninguno.
+    const methodInserts = sqlFiles.filter((f) => /INSERT\s+INTO\s+"?shipping_methods"?/i.test(read(f)));
+    expect(methodInserts.length).toBeGreaterThanOrEqual(1);
+    for (const file of methodInserts) expect(read(file), rel(file)).toMatch(/WHERE NOT EXISTS \(SELECT 1 FROM "shipping_methods"\)/);
+    // Tarifa inicial: UNA sola migración, solo si el método no tiene ninguna tarifa.
+    const rateInserts = sqlFiles.filter((f) => /INSERT\s+INTO\s+"?shipping_rates"?/i.test(read(f)));
+    expect(rateInserts.length).toBe(1);
+    expect(read(rateInserts[0])).toMatch(/NOT EXISTS \(SELECT 1 FROM "shipping_rates" r WHERE r\."method_id" = m\."id"\)/);
     expect(all.filter((p) => /seed/i.test(rel(p)))).toEqual([]);
   });
 
@@ -363,6 +366,51 @@ describe("envíos solo Costa Rica y logística manual", () => {
     expect(read(join(SRC, "domain/order-status.ts"))).toMatch(/"PREPARING"[\s\S]*"PACKED"[\s\S]*"SHIPPED"[\s\S]*"DELIVERED"/);
     const orders = read(join(SRC, "db/schema/orders.ts"));
     for (const column of ["carrier", "tracking_number", "tracking_url", "shipped_at", "delivered_at", "internal_notes"]) expect(orders).toContain(column);
+  });
+});
+
+describe("envío nacional editable desde el Admin", () => {
+  const sources = () => all.filter((p) => !/\.test\.ts$/.test(p));
+
+  it("la tarifa NO está escrita en el código: ni 4000 ni 3500 ni 4500 en ningún archivo de la aplicación", () => {
+    for (const file of sources()) expect(stripComments(read(file)), rel(file)).not.toMatch(/\b(4000|3500|4500)\b|\b(4|3)\.500\b|\b4\.000\b|shipping\s*=\s*\d/);
+  });
+
+  it("el checkout toma la tarifa de la base de datos (tarifas activas), nunca de una constante", () => {
+    const source = stripComments(read(join(SRC, "server/services/checkout/totals.ts")));
+    expect(source).toMatch(/from\(shippingRates\)/);
+    expect(source).toMatch(/eq\(shippingRates\.isActive, true\)/);
+    expect(source).toMatch(/eq\(shippingMethods\.isActive, true\)/);
+  });
+
+  it("el formulario simple no acepta id de método, id de tarifa, país ni montos calculados del navegador", () => {
+    const action = stripComments(read(join(SRC, "server/actions/settings.ts")));
+    const chunk = action.slice(action.indexOf("export async function saveNationalShippingAction"), action.indexOf("export async function saveShippingMethodAction"));
+    expect(chunk).toMatch(/requirePermission\("settings:write"\)/);
+    expect(chunk).not.toMatch(/methodId|rateId|country|pais|total|subtotal/i);
+    const service = stripComments(read(join(SRC, "server/services/settings/shipping.ts")));
+    expect(service).toMatch(/export async function saveNationalShipping\(db: Database, input: ParsedNationalShipping, actor: AuditActor\)/);
+  });
+
+  it("cada cambio económico del envío deja auditoría (crear, modificar, tarifa, activar, desactivar)", () => {
+    const service = read(join(SRC, "server/services/settings/shipping.ts"));
+    for (const action of ["shipping.method_created", "shipping.method_updated", "shipping.method_activated", "shipping.method_deactivated", "shipping.rate_created", "shipping.rate_changed"]) {
+      expect(service, action).toContain(action);
+    }
+    expect(service).toMatch(/changesOf\(/); // guarda antes → después
+  });
+
+  it("el costo real del envío es interno: solo existe en el schema de orders, nunca en código público ni en el checkout", () => {
+    const mentions = sources().filter((p) => /shippingActualCost|shipping_actual_cost/.test(read(p))).map(rel);
+    expect(mentions).toEqual(["src/db/schema/orders.ts"]);
+  });
+
+  it("si el método está desactivado, el checkout lo dice y no deja continuar", () => {
+    const page = read(join(SRC, "app/(store)/checkout/page.tsx"));
+    expect(page).toMatch(/No hay un método de envío disponible/);
+    expect(page).toMatch(/totals\.canProceed/);
+    const engine = stripComments(read(join(SRC, "domain/checkout.ts")));
+    expect(engine).toMatch(/canProceed: blockers\.length === 0 && total !== null/);
   });
 });
 

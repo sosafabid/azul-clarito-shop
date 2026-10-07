@@ -101,7 +101,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                   {method.description && <p className="mt-1 text-sm leading-relaxed text-ink/75">{method.description}</p>}
                 </div>
               ) : (
-                <p className="mt-2 text-sm font-semibold text-coral">El envío todavía no está configurado.</p>
+                <p className="mt-2 text-sm font-semibold text-coral">No hay un método de envío disponible por el momento.</p>
               )}
               {method && countryProblem && <p className="mt-3 text-sm font-semibold text-coral">{COUNTRY_ONLY_MESSAGE}</p>}
               {method && !countryProblem && shipping.state === "needs_destination" && <p className="mt-3 text-sm text-ink/75">Seleccioná tu provincia para ver el costo del envío.</p>}
@@ -143,6 +143,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 <dt>{method?.name ?? "Envío"}</dt>
                 <dd className="max-w-[12rem] text-right font-semibold">
                   {countryProblem ? COUNTRY_ONLY_MESSAGE
+                    : !method ? "No hay un método de envío disponible por el momento."
                     : shipping.state === "selected" && shipping.selected ? (shipping.selected.free ? "Gratis" : money(shipping.selected.amount))
                     : shipping.state === "needs_destination" ? "Seleccioná tu dirección para ver el costo del envío"
                     : "El envío para este destino todavía no está configurado."}
@@ -156,7 +157,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
             </dl>
 
             <button type="button" disabled aria-disabled="true" aria-describedby="pay-soon" className="mt-6 inline-flex min-h-12 w-full cursor-not-allowed items-center justify-center rounded-full bg-navy/40 px-8 py-3 font-display font-bold text-paper">Continuar al pago</button>
-            <p id="pay-soon" className="mt-2 text-center text-sm font-semibold text-navy/80">El pago estará disponible próximamente.</p>
+            <p id="pay-soon" className="mt-2 text-center text-sm font-semibold text-navy/80">{totals.canProceed ? "El pago estará disponible próximamente." : "Para continuar necesitamos un envío válido para tu destino."}</p>
           </aside>
         </div>
       </Container>

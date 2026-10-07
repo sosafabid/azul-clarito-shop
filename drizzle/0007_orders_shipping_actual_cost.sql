@@ -1,0 +1,2 @@
+ALTER TABLE "orders" ADD COLUMN "shipping_actual_cost" bigint;--> statement-breakpoint
+ALTER TABLE "orders" ADD CONSTRAINT "orders_shipping_actual_cost_non_negative" CHECK ("orders"."shipping_actual_cost" IS NULL OR "orders"."shipping_actual_cost" >= 0);

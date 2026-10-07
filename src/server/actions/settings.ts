@@ -3,11 +3,11 @@
 import { redirect } from "next/navigation";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
-import { parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "@/domain/settings-form";
+import { parseNationalShippingForm, parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "@/domain/settings-form";
 import { formToRecord } from "@/server/admin-forms";
 import { requirePermission } from "@/server/auth";
 import { resolveAuditActor } from "@/server/services/audit";
-import { deleteShippingRate, saveShippingMethod, saveShippingRate, setShippingMethodActive, setShippingRateActive } from "@/server/services/settings/shipping";
+import { deleteShippingRate, saveNationalShipping, saveShippingMethod, saveShippingRate, setShippingMethodActive, setShippingRateActive } from "@/server/services/settings/shipping";
 import { addTaxRule, deleteTaxRule, saveTaxRate } from "@/server/services/settings/tax";
 
 /**
@@ -48,6 +48,19 @@ export async function deleteTaxRuleAction(ruleId: string): Promise<void> {
 }
 
 // ── Envíos ──
+/**
+ * Formulario simple del "Envío nacional": nombre, descripción, tarifa, moneda y estado. NO recibe ids ni país: el servidor
+ * decide qué método y qué tarifa base se editan, y por ahora el país siempre es Costa Rica.
+ */
+export async function saveNationalShippingAction(formData: FormData): Promise<void> {
+  const session = await requirePermission("settings:write");
+  if (!isDatabaseConfigured()) back(routes.adminShipping, "error", NO_DB);
+  const parsed = parseNationalShippingForm(formToRecord(formData));
+  if (!parsed.ok) back(routes.adminShipping, "error", firstError(parsed.errors));
+  const result = await saveNationalShipping(getDb(), parsed.data, resolveAuditActor(session));
+  back(routes.adminShipping, result.ok ? "saved" : "error", result.ok ? (result.changed ? "Cambios guardados." : "No había cambios que guardar.") : result.message);
+}
+
 export async function saveShippingMethodAction(methodId: string, formData: FormData): Promise<void> {
   const session = await requirePermission("settings:write");
   if (!isDatabaseConfigured()) back(routes.adminShipping, "error", NO_DB);
