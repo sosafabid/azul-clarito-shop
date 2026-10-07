@@ -7,6 +7,10 @@ import { getDb, isDatabaseConfigured } from "@/db";
 import { requirePermission } from "@/server/auth";
 import { createProductAction } from "@/server/actions/products";
 import { listCategoryOptions, listCollectionOptions } from "@/server/services/catalog/taxonomy";
+import { isBlobConfigured } from "@/server/services/images/storage";
+
+// Subir imágenes puede tardar: se amplía el tiempo máximo de la función (por defecto Vercel corta a los 10-15 s).
+export const maxDuration = 30;
 
 export const metadata: Metadata = { title: "Nuevo producto" };
 
@@ -46,7 +50,7 @@ export default async function NewProductPage() {
       </Link>
       <h1 className="text-3xl font-bold">Nuevo producto</h1>
       {configured ? (
-        <ProductForm action={createProductAction} mode="create" initial={EMPTY} categories={categories} collections={collections} />
+        <ProductForm action={createProductAction} mode="create" initial={EMPTY} categories={categories} collections={collections} uploadsEnabled={isBlobConfigured()} />
       ) : (
         <DatabaseNotice />
       )}

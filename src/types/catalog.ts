@@ -50,6 +50,8 @@ export type PublicProductListItem = PublicProduct & {
   imageUrl: string | null;
   imageAlt: string | null;
   availability: ProductAvailability;
+  /** Tiene variantes activas: hay que elegir una antes de agregar al carrito. */
+  hasVariants: boolean;
 };
 
 /** Variante visible al público: opciones, precio y un ESTADO de disponibilidad (nunca cantidades ni costo). */

@@ -68,7 +68,8 @@ Abrí <http://localhost:3000>. Rutas disponibles:
 | `/` | Home temporal (identidad visual base) |
 | `/shop` | **Lee productos ACTIVOS desde PostgreSQL** (si no hay ninguno, "Próximamente") |
 | `/shop/[slug]` | **Ficha de producto desde PostgreSQL**: nombre, descripción, precio, imagen (si existe) y disponibilidad. Slug inexistente o inactivo → 404 |
-| `/cart`, `/checkout` | "Próximamente" |
+| `/cart` | **Carrito** (invitada o con sesión): líneas, cantidades, eliminar, subtotal y estado vacío |
+| `/checkout` | "Próximamente" |
 | `/account/register`, `/account/login` | **Crear cuenta** (nombre, correo, teléfono opcional, contraseña y consentimientos) e **ingresar** |
 | `/account` | **Mi cuenta** (requiere sesión): editar datos, ver y cambiar consentimientos (con historial), cambiar contraseña y eliminar la cuenta |
 | `/account/orders` | "Próximamente" (requiere sesión) |
@@ -284,6 +285,25 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
 - **Auditoría** (`audit_logs`): creación, edición (con lista de campos), cambios de precio/costo/moneda/stock (antes y después),
   publicar, ocultar, archivar, restaurar, eliminación, imágenes, variantes e inicios de sesión.
 
+## Carrito
+
+- **Qué guarda:** solo ids y cantidades (`carts`, `cart_items`; sin columnas de precio ni costo). Nombre, imagen, **precio actual** y **stock** se leen
+  de la base cada vez que se muestra o se modifica. Nunca se usa un precio que venga del navegador, y el costo no se selecciona en ninguna consulta del carrito.
+- **Invitada:** cookie `ac_cart` (`HttpOnly`, `SameSite=Lax`, `Secure` en producción, 30 días) con un token aleatorio; en la base solo está su hash.
+  Mirar el carrito no crea nada: el carrito nace al agregar el primer producto.
+- **Con sesión:** un carrito por cuenta (`carts.user_id`). Un carrito pertenece a una cuenta **o** a una invitada, nunca a las dos (CHECK en la base).
+- **Fusión:** al iniciar sesión o registrarse, el carrito de invitada se suma al de la cuenta (cantidades sumadas, sin pasar del stock; líneas en otra moneda se
+  descartan), y se borran el carrito y la cookie de invitada. Si la fusión falla, no bloquea el ingreso.
+- **Validación al agregar o cambiar cantidad (servidor):** producto existe y está ACTIVO → si tiene variantes, exige una variante ACTIVA de ese producto →
+  precio actual → stock disponible → cantidad entera ≥ 1, limitada al stock y a un máximo de 20 por línea. Cada variante es una línea distinta; repetir
+  producto/variante **suma** en la misma línea (una sola sentencia atómica, también con clics simultáneos).
+- **Cambios mientras está en el carrito:** si el producto se oculta, archiva o se queda sin stock, la línea **no se elimina en silencio**: se marca
+  "Este producto ya no está disponible", solo permite eliminar y no suma al subtotal. Con stock menor al pedido: "Solo quedan N" y botón "Ajustar a N".
+- **Agregar al carrito NO reserva stock.** La reserva ocurrirá en el checkout. Un carrito admite una sola moneda y hasta 30 productos distintos.
+- **Contador del header:** total de unidades, leído de la base en el servidor (por eso la portada y las páginas legales ahora se generan en cada visita).
+- **Acciones públicas** (`src/server/actions/cart.ts`): aceptan solo ids y cantidades; verifican que la línea sea del carrito de quien la pide (pruebas de arquitectura).
+- **Imágenes de productos:** ver "Imágenes" más arriba. Sin `BLOB_READ_WRITE_TOKEN` el panel lo explica y permite usar URLs; la subida tiene 2 reintentos y un tope de 25 s.
+
 ## Cuentas de clientas y consentimiento
 
 - **Registro:** nombre, correo, teléfono (opcional), contraseña (mín. 12 caracteres) y consentimientos. Al terminar queda con la sesión iniciada.
@@ -323,7 +343,9 @@ cuando los autores publiquen sus actualizaciones.
 - Revisión legal de `/terminos` y `/privacidad` (ver abajo)
 - Gestión de usuarios del equipo desde el panel (hoy se crean con `npm run admin:create`)
 - Importación de inventario real, subida de imágenes (almacenamiento/CDN), variantes en el panel y categorías en el panel
-- Carrito y checkout reales
+- Checkout real, órdenes, pagos y reserva de stock (el carrito ya existe, pero **no reserva** inventario)
+- Limpieza automática de carritos de invitada abandonados (`carts.updated_at` ya queda guardado)
+- Eventos de analytics del carrito (add_to_cart, view_cart…)
 - Pagos (proveedor compatible con Costa Rica por elegir)
 - Emails (Resend) y plantillas
 - Cálculo de envíos (la primera versión será manual)

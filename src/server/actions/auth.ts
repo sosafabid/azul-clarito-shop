@@ -8,6 +8,7 @@ import { parseRegistrationForm } from "@/domain/customer-form";
 import { endSession, startSession } from "@/server/auth";
 import { attemptLogin } from "@/server/services/auth/login";
 import { registerCustomer } from "@/server/services/accounts";
+import { mergeCartOnLogin } from "@/server/services/cart/request";
 
 /**
  * ACCIONES PÚBLICAS DE SESIÓN: ingresar (equipo y clientas), registrarse y salir.
@@ -32,6 +33,7 @@ export async function loginAction(_previous: LoginState, formData: FormData): Pr
   });
   if (!result.ok) return GENERIC_FAILURE;
   await startSession(result.userId);
+  await mergeCartOnLogin(result.userId); // el carrito de invitada se conserva y se fusiona
   redirect(routes.admin);
 }
 
@@ -50,6 +52,7 @@ export async function customerLoginAction(_previous: LoginState, formData: FormD
   });
   if (!result.ok) return GENERIC_FAILURE;
   await startSession(result.userId);
+  await mergeCartOnLogin(result.userId); // el carrito de invitada se conserva y se fusiona
   redirect(routes.account);
 }
 
@@ -84,5 +87,6 @@ export async function registerAction(_previous: RegisterState, formData: FormDat
   }
 
   await startSession(result.userId);
+  await mergeCartOnLogin(result.userId); // el carrito de invitada se conserva y se fusiona
   redirect(`${routes.account}?bienvenida=1`);
 }

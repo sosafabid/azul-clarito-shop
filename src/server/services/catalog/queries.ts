@@ -27,6 +27,7 @@ const AVAILABLE_SQL = sql<number>`coalesce((select sum(i.available_stock) from i
 const THRESHOLD_SQL = sql<number>`coalesce((select max(i.low_stock_threshold) from inventory i where i.product_id = ${products.id}), 0)`.mapWith(
   Number,
 );
+const HAS_VARIANTS_SQL = sql<boolean>`exists (select 1 from product_variants pv where pv.product_id = ${products.id} and pv.is_active)`;
 const PRIMARY_IMAGE_URL = sql<string | null>`(select pi.url from product_images pi where pi.product_id = ${products.id} order by pi.is_primary desc, pi.sort_order asc, pi.created_at asc limit 1)`;
 const PRIMARY_IMAGE_ALT = sql<string | null>`(select pi.alt from product_images pi where pi.product_id = ${products.id} order by pi.is_primary desc, pi.sort_order asc, pi.created_at asc limit 1)`;
 
@@ -42,6 +43,7 @@ const listColumns = {
   imageAlt: PRIMARY_IMAGE_ALT,
   availableStock: AVAILABLE_SQL,
   lowStockThreshold: THRESHOLD_SQL,
+  hasVariants: HAS_VARIANTS_SQL,
 } as const;
 
 type ListRow = Parameters<typeof toPublicProduct>[0] & {
@@ -50,6 +52,7 @@ type ListRow = Parameters<typeof toPublicProduct>[0] & {
   imageAlt: string | null;
   availableStock: number;
   lowStockThreshold: number;
+  hasVariants: boolean;
 };
 
 function toListItem(row: ListRow): PublicProductListItem {
@@ -59,6 +62,7 @@ function toListItem(row: ListRow): PublicProductListItem {
     imageUrl: row.imageUrl,
     imageAlt: row.imageAlt,
     availability: toAvailability(row.availableStock, row.lowStockThreshold),
+    hasVariants: row.hasVariants,
   };
 }
 

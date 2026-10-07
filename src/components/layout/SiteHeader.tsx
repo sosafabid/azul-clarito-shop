@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import { CartIcon } from "@/components/ui/icons";
+import { Suspense } from "react";
+import { CartLink, CartLinkView } from "@/components/cart/CartLink";
 import { mainNav } from "@/config/navigation";
 import { routes } from "@/config/routes";
 import { siteConfig } from "@/config/site";
@@ -49,13 +50,9 @@ export function SiteHeader() {
                 ))}
               </ul>
             </nav>
-            <Link
-              href={routes.cart}
-              aria-label="Carrito"
-              className="inline-flex size-11 items-center justify-center rounded-full text-navy hover:bg-celeste/60"
-            >
-              <CartIcon className="size-6" />
-            </Link>
+            <Suspense fallback={<CartLinkView count={null} />}>
+              <CartLink />
+            </Suspense>
             <MobileNav items={mainNav} />
           </div>
         </div>

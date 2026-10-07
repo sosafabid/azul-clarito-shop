@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { changedProductFields, type ProductEditableFields } from "./product-audit";
-import { parseImageUrls, validateImageBatch, validateImageFile } from "./images";
+import { describeUploadError, parseImageUrls, validateImageBatch, validateImageFile } from "./images";
 import {
   availableActions,
   canApplyAction,
@@ -57,6 +57,14 @@ describe("imágenes", () => {
     expect(validateImageBatch([{ type: "image/png", size: 2 * mb }, { type: "image/png", size: 1 * mb }])).toBeNull();
     expect(validateImageBatch([{ type: "image/png", size: 3 * mb }, { type: "image/png", size: 3 * mb }])).toMatch(/suman 6\.0 MB/);
     expect(validateImageBatch([{ type: "image/gif", size: 10, name: "a.gif" }])).toMatch(/a\.gif: Solo se aceptan/);
+  });
+  it("errores del almacenamiento → mensajes útiles", () => {
+    const named = (name: string, message: string) => Object.assign(new Error(message), { name });
+    expect(describeUploadError(named("BlobAccessError", "Access denied, please provide a valid token"))).toMatch(/rechazó el acceso/);
+    expect(describeUploadError(named("BlobStoreNotFoundError", "This store does not exist."))).toMatch(/Blob store/);
+    expect(describeUploadError(new Error("Cannot use public access on a private store"))).toMatch(/privado/);
+    expect(describeUploadError(named("BlobRequestAbortedError", "The request was aborted."))).toMatch(/tardó demasiado/);
+    expect(describeUploadError("boom")).toMatch(/No se pudo subir/);
   });
   it("URLs: solo https, sin credenciales, sin duplicados", () => {
     const r = parseImageUrls("https://cdn.ejemplo.com/a.jpg\nhttps://cdn.ejemplo.com/a.jpg, https://cdn.ejemplo.com/b.png");

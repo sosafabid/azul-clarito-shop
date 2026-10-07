@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import type { ProductFormState } from "@/server/actions/products";
+import { ImageFileInput, StorageSetupNotice } from "./ImageFileInput";
 import { Notice } from "./Notice";
 
 const inputClass = "w-full rounded-xl border-2 border-celeste bg-paper px-4 py-2.5 text-ink focus:border-aqua focus:outline-none";
@@ -24,15 +25,13 @@ export function AddImagesForm({
     <form action={formAction} className="space-y-4 rounded-2xl bg-celeste/25 p-4">
       <h3 className="font-display text-lg font-bold text-navy">Agregar imágenes</h3>
       {state?.message && <Notice tone="error">{state.message}</Notice>}
-      <label className="block text-sm font-bold text-navy">
-        Archivos (JPG, PNG, WebP o AVIF · máx. 4 MB)
-        <input name="imageFiles" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" disabled={!uploadsEnabled} className={`mt-1.5 ${inputClass}`} />
-      </label>
-      {!uploadsEnabled && (
-        <p className="text-xs text-ink/70">
-          La subida de archivos se activa al configurar <code>BLOB_READ_WRITE_TOKEN</code> (almacenamiento de Vercel). Mientras tanto, usá URLs.
-        </p>
-      )}
+      {!uploadsEnabled && <StorageSetupNotice />}
+      <div className="text-sm font-bold text-navy">
+        Archivos
+        <div className="mt-1.5 font-normal">
+          <ImageFileInput name="imageFiles" disabled={!uploadsEnabled} />
+        </div>
+      </div>
       {errors.imageFiles && <p role="alert" className="text-xs font-semibold text-coral">{errors.imageFiles}</p>}
       <label className="block text-sm font-bold text-navy">
         …o URLs https (una por línea)

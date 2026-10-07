@@ -5,6 +5,7 @@ import { DEFAULT_CURRENCY, SUPPORTED_CURRENCIES, formatMoney, parseMoneyInput, t
 import { formatPercent, inventoryEconomics, unitEconomics } from "@/domain/product-economics";
 import { slugify } from "@/domain/slug";
 import type { ProductFormState } from "@/server/actions/products";
+import { ImageFileInput, StorageSetupNotice } from "./ImageFileInput";
 import { Notice } from "./Notice";
 
 export type ProductFormValues = {
@@ -43,6 +44,8 @@ type ProductFormProps = {
   collections: Option[];
   /** Si el producto tiene variantes, el stock se gestiona en cada una. */
   hasVariants?: boolean;
+  /** Hay almacenamiento externo configurado (permite subir archivos). */
+  uploadsEnabled?: boolean;
 };
 
 const inputClass =
@@ -66,7 +69,7 @@ function Field({ label, error, hint, children }: { label: string; error?: string
   );
 }
 
-export function ProductForm({ action, mode, initial, expectedAvailableStock, systemStock, categories, collections, hasVariants = false }: ProductFormProps) {
+export function ProductForm({ action, mode, initial, expectedAvailableStock, systemStock, categories, collections, hasVariants = false, uploadsEnabled = false }: ProductFormProps) {
   const [state, formAction, pending] = useActionState(action, null);
   const [values, setValues] = useState<ProductFormValues>(initial);
   const [slugTouched, setSlugTouched] = useState(mode === "edit");
@@ -288,8 +291,9 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
               podés agregarlas después, desde la ficha del producto.
             </p>
           </div>
+          {!uploadsEnabled && <StorageSetupNotice />}
           <Field label="Archivos" error={errors.imageFiles}>
-            <input name="imageFiles" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif" className={inputClass} />
+            <ImageFileInput name="imageFiles" disabled={!uploadsEnabled} />
           </Field>
           <Field label="URLs de imágenes (una por línea)" error={errors.imageUrls}>
             <textarea name="imageUrls" rows={3} value={values.imageUrls} onChange={(e) => set("imageUrls", e.target.value)} className={inputClass} placeholder="https://…" />

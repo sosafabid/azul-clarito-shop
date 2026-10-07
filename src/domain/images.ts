@@ -68,3 +68,24 @@ export function parseImageUrls(text: string): { urls: string[]; errors: string[]
   }
   return { urls, errors };
 }
+
+/**
+ * Traduce un error del servicio de almacenamiento a un mensaje útil para quien administra
+ * la tienda (el detalle técnico queda en los registros del servidor, sin secretos).
+ */
+export function describeUploadError(error: unknown): string {
+  const text = error instanceof Error ? `${error.name} ${error.message}`.toLowerCase() : "";
+  if (text.includes("abort") || text.includes("timeout") || text.includes("timed out")) {
+    return "El almacenamiento tardó demasiado en responder. Intentá de nuevo (con una imagen más liviana si es posible).";
+  }
+  if (text.includes("access denied") || text.includes("blobaccesserror") || text.includes("token")) {
+    return "El almacenamiento rechazó el acceso: revisá que BLOB_READ_WRITE_TOKEN sea el correcto y pertenezca al proyecto actual.";
+  }
+  if (text.includes("store") && (text.includes("not exist") || text.includes("not found") || text.includes("suspended"))) {
+    return "No encontramos el almacenamiento de imágenes (Blob store) o está suspendido. Revisá la conexión en Vercel.";
+  }
+  if (text.includes("private")) {
+    return "El almacenamiento está configurado como privado. Creá un Blob store de acceso Público para las imágenes de la tienda.";
+  }
+  return "No se pudo subir la imagen al almacenamiento. Intentá de nuevo; si sigue fallando, revisá los registros del servidor.";
+}

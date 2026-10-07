@@ -77,8 +77,8 @@ describe("frontera pública / privada", () => {
 
 describe("autorización en el servidor", () => {
   it("cada Server Action exige sesión/permiso ANTES de tocar la base de datos", () => {
-    // login / registro / logout son públicas por naturaleza (se prueban aparte, abajo).
-    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts"));
+    // login / registro / logout y el carrito son públicos por naturaleza (se prueban aparte, abajo).
+    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts"));
     expect(files.length).toBeGreaterThanOrEqual(4);
 
     for (const file of files) {
@@ -195,6 +195,64 @@ describe("cuentas de clientas y consentimiento", () => {
     const service = stripComments(read(join(SRC, "server/services/accounts.ts")));
     expect(service).toMatch(/fields/);
     expect(service).not.toMatch(/metadata:\s*\{[^}]*(email|phone|name)\s*:/);
+  });
+});
+
+describe("carrito", () => {
+  const cartServices = () => all.filter((p) => rel(p).startsWith("src/server/services/cart/"));
+
+  it("las acciones del carrito aceptan SOLO ids y cantidades: nunca precio, costo, usuario ni carrito", () => {
+    const source = stripComments(read(join(SRC, "server/actions/cart.ts")));
+    expect(source).not.toMatch(/formData\.get\(["'](price|unitPrice|cost|total|subtotal|userId|cartId|ownerId)["']\)/);
+    // la dueña del carrito se deduce de la sesión o de la cookie de invitada, no del formulario
+    expect(source).toMatch(/getOwnerForWrite\(/);
+    expect(source).toMatch(/getCartOwner\(/);
+    expect(source).not.toMatch(/\bprice\b|\bcost\b/i);
+  });
+
+  it("el servicio del carrito nunca lee ni calcula costos, márgenes o utilidades", () => {
+    const files = cartServices();
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    for (const file of files) expect(stripComments(read(file)), rel(file)).not.toMatch(/\bcost\b|margin|profit|utilidad/i);
+  });
+
+  it("las tablas del carrito no guardan precios ni costos (solo ids y cantidades)", () => {
+    expect(stripComments(read(join(SRC, "db/schema/carts.ts")))).not.toMatch(/price|cost/i);
+  });
+
+  it("modificar o eliminar una línea siempre verifica que sea del carrito de quien lo pide", () => {
+    const source = stripComments(read(join(SRC, "server/services/cart/cart.ts")));
+    expect(source).toMatch(/async function findOwnedLine[\s\S]*?ownerCondition\(owner\)/);
+    // setQuantity y removeLine parten de findOwnedLine
+    expect(source).toMatch(/async function setQuantity[\s\S]*?findOwnedLine\(/);
+    expect(source).toMatch(/async function removeLine[\s\S]*?findOwnedLine\(/);
+  });
+
+  it("el precio y la disponibilidad se leen de la base en el servidor antes de agregar o cambiar cantidad", () => {
+    const source = stripComments(read(join(SRC, "server/services/cart/cart.ts")));
+    expect(source).toMatch(/async function addItem[\s\S]*?resolvePurchasable\(/);
+    expect(source).toMatch(/async function setQuantity[\s\S]*?resolvePurchasable\(/);
+    expect(source).toMatch(/status !== "ACTIVE"/); // solo productos activos
+  });
+
+  it("la cookie de invitada es HttpOnly + SameSite y contiene solo un token aleatorio", () => {
+    const source = read(join(SRC, "server/services/cart/identity.ts"));
+    expect(source).toMatch(/httpOnly: true/);
+    expect(source).toMatch(/sameSite: "lax"/);
+    expect(source).toMatch(/secure: process\.env\.NODE_ENV === "production"/);
+    expect(source).toMatch(/randomBytes\(32\)/);
+  });
+
+  it("todo inicio de sesión (equipo, clientas, registro) fusiona el carrito de invitada", () => {
+    const callers = all.filter((p) => /startSession\(/.test(stripComments(read(p))) && !rel(p).includes("server/auth/"));
+    expect(callers.length).toBeGreaterThanOrEqual(1);
+    for (const file of callers) expect(stripComments(read(file)), rel(file)).toMatch(/mergeCartOnLogin\(/);
+  });
+
+  it("agregar al carrito NO reserva stock: el servicio nunca escribe en inventory", () => {
+    for (const file of cartServices()) {
+      expect(stripComments(read(file)), rel(file)).not.toMatch(/db\.(update|insert|delete)\(\s*inventory\b/);
+    }
   });
 });
 

@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
+import { AddToCartForm } from "@/components/shop/AddToCartForm";
 import { AvailabilityBadge } from "@/components/shop/AvailabilityBadge";
 import { ProductImage } from "@/components/shop/ProductImage";
 import { ComingSoon } from "@/components/ui/ComingSoon";
 import { Container } from "@/components/ui/Container";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { variantLabel } from "@/domain/cart";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { SLUG_PATTERN } from "@/domain/slug";
 import { getPublicProductBySlug } from "@/server/services/catalog/queries";
@@ -85,33 +87,17 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             {product.shortDescription && <p className="mt-6 text-lg leading-relaxed text-ink">{product.shortDescription}</p>}
             {product.description && <p className="mt-4 whitespace-pre-line leading-relaxed text-ink/80">{product.description}</p>}
 
-            {product.variants.length > 0 && (
-              <div className="mt-8">
-                <h2 className="font-display text-sm font-bold uppercase tracking-[0.14em] text-navy/60">Opciones disponibles</h2>
-                <ul className="mt-3 space-y-2">
-                  {product.variants.map((variant) => (
-                    <li key={variant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-celeste px-4 py-3">
-                      <span className="font-display font-bold text-navy">
-                        {variant.name || Object.values(variant.options).join(" / ")}
-                        {variant.price !== null && (
-                          <span className="ml-2 font-normal text-ink/70">{formatMoney(variant.price, toCurrency(product.currency))}</span>
-                        )}
-                      </span>
-                      <AvailabilityBadge availability={variant.availability} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <button
-              type="button"
-              disabled
-              className="mt-8 inline-flex min-h-12 cursor-not-allowed items-center rounded-full bg-navy/50 px-8 py-3 font-display font-bold text-paper"
-            >
-              {soldOut ? "Agotado" : "Comprar — muy pronto"}
-            </button>
-            <p className="mt-3 text-sm text-ink/60">La compra en línea estará disponible próximamente.</p>
+            <AddToCartForm
+              productId={product.id}
+              soldOut={soldOut}
+              options={product.variants.map((variant) => ({
+                id: variant.id,
+                label: variantLabel(variant),
+                priceLabel: variant.price !== null ? formatMoney(variant.price, toCurrency(product.currency)) : null,
+                availability: variant.availability,
+              }))}
+            />
+            <p className="mt-3 text-sm text-ink/60">El pago en línea estará disponible muy pronto. Mientras tanto, podés ir armando tu carrito.</p>
           </div>
         </div>
       </Container>

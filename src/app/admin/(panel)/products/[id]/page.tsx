@@ -20,6 +20,9 @@ import { listProductVariants } from "@/server/services/catalog/admin-variants";
 import { listCategoryOptions, listCollectionOptions } from "@/server/services/catalog/taxonomy";
 import { isBlobConfigured } from "@/server/services/images/storage";
 
+// Subir imágenes puede tardar: se amplía el tiempo máximo de la función (por defecto Vercel corta a los 10-15 s).
+export const maxDuration = 30;
+
 export const metadata: Metadata = { title: "Editar producto" };
 
 function plainMoney(amount: number | null, currency: string): string {

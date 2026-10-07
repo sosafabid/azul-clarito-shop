@@ -7,6 +7,7 @@ import { orderItems, orders } from "./orders";
 import { payments } from "./payments";
 import { shippingMethods, shippingRates } from "./shipping";
 import { userConsents } from "./consents";
+import { cartItems, carts } from "./carts";
 import { sessions } from "./sessions";
 import { users } from "./users";
 
@@ -102,4 +103,15 @@ export const shippingRatesRelations = relations(shippingRates, ({ one }) => ({
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   actor: one(users, { fields: [auditLogs.actorUserId], references: [users.id] }),
+}));
+
+export const cartsRelations = relations(carts, ({ one, many }) => ({
+  user: one(users, { fields: [carts.userId], references: [users.id] }),
+  items: many(cartItems),
+}));
+
+export const cartItemsRelations = relations(cartItems, ({ one }) => ({
+  cart: one(carts, { fields: [cartItems.cartId], references: [carts.id] }),
+  product: one(products, { fields: [cartItems.productId], references: [products.id] }),
+  variant: one(productVariants, { fields: [cartItems.variantId], references: [productVariants.id] }),
 }));
