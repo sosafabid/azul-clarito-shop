@@ -3,6 +3,7 @@ export * from "./enums";
 export * from "./users";
 export * from "./sessions";
 export * from "./carts";
+export * from "./tax";
 export * from "./consents";
 export * from "./addresses";
 export * from "./catalog";

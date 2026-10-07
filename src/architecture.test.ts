@@ -40,6 +40,7 @@ describe("frontera pública / privada", () => {
     "@/server/services/catalog/admin-images",
     "@/server/services/catalog/admin-variants",
     "@/server/services/catalog/taxonomy",
+    "@/server/services/settings",
     "@/server/services/inventory",
     "@/server/services/images",
     // acciones del panel (las de sesión y cuenta de clientas SÍ las usa la tienda):
@@ -253,6 +254,69 @@ describe("carrito", () => {
     for (const file of cartServices()) {
       expect(stripComments(read(file)), rel(file)).not.toMatch(/db\.(update|insert|delete)\(\s*inventory\b/);
     }
+  });
+});
+
+describe("checkout, impuestos y envíos", () => {
+  const publicFiles = () =>
+    all.filter((p) => ["src/app/(store)/", "src/components/shop/", "src/components/ui/", "src/components/layout/", "src/components/home/", "src/components/account/", "src/components/cart/"].some((prefix) => rel(p).startsWith(prefix)));
+
+  it("el checkout solo lee de la URL el destino y el método: nunca montos", () => {
+    const source = stripComments(read(join(SRC, "app/(store)/checkout/page.tsx")));
+    const declared = /searchParams: Promise<\{([^}]*)\}>/.exec(source)?.[1] ?? "";
+    const names = [...declared.matchAll(/(\w+)\??:/g)].map((m) => m[1]).sort();
+    expect(names).toEqual(["ciudad", "cp", "envio", "pais", "provincia"]);
+    expect(source).toMatch(/calculateCheckoutTotals\(/);
+    expect(source).not.toMatch(/name="(total|subtotal|impuesto|tax|precio|price|envioPrecio|shippingCost)"/i);
+  });
+
+  it("el motor de totales no recibe ningún monto calculado: solo precios leídos, tasas y tarifas", () => {
+    const source = stripComments(read(join(SRC, "domain/checkout.ts")));
+    const signature = source.slice(source.indexOf("export function computeTotals(input: {"), source.indexOf("}): CheckoutTotals {"));
+    expect(signature.length).toBeGreaterThan(50);
+    expect(signature).not.toMatch(/\b(total|subtotal|taxAmount|shippingAmount|shippingCost|tax\w*Total)\b/);
+  });
+
+  it("el servicio de totales lee precios, tasa y tarifas de la base de datos (no de parámetros)", () => {
+    const source = stripComments(read(join(SRC, "server/services/checkout/totals.ts")));
+    expect(source).toMatch(/getCartView\(/); // precios y stock revalidados
+    expect(source).toMatch(/loadTaxConfig\(/);
+    expect(source).toMatch(/loadShippingMethods\(/);
+    expect(source).not.toMatch(/input\.(total|price|tax|shippingCost|amount)/);
+  });
+
+  it("checkout, impuestos y envíos nunca tocan costos, márgenes ni utilidades", () => {
+    const files = ["domain/checkout.ts", "domain/tax.ts", "domain/shipping.ts", "domain/settings-form.ts", "server/services/checkout/totals.ts", "server/services/settings/tax.ts", "server/services/settings/shipping.ts", "app/(store)/checkout/page.tsx"];
+    for (const file of files) expect(stripComments(read(join(SRC, file))), file).not.toMatch(/\bcost\b|margin|profit|utilidad/i);
+  });
+
+  it("todas las acciones de impuestos y envíos exigen settings:write (solo SUPER_ADMIN)", () => {
+    const source = read(join(SRC, "server/actions/settings.ts"));
+    const chunks = source.split(/export async function /).slice(1);
+    expect(chunks.length).toBeGreaterThanOrEqual(7);
+    for (const chunk of chunks) expect(chunk.slice(0, 400), chunk.slice(0, 40)).toMatch(/requirePermission\("settings:write"\)/);
+  });
+
+  it("ninguna tasa ni tarifa está escrita en el código público (todo sale de la configuración)", () => {
+    for (const file of publicFiles()) {
+      const code = stripComments(read(file));
+      expect(code, rel(file)).not.toMatch(/\bIVA\b|\b0\.13\b|\b13 ?%|\b1300\b/);
+      expect(code, rel(file)).not.toMatch(/₡\s?\d/);
+    }
+  });
+
+  it("no se precargan impuestos ni tarifas: ninguna migración inserta en tax_* ni shipping_*", () => {
+    const dir = join(process.cwd(), "drizzle");
+    for (const file of walk(dir).filter((f) => f.endsWith(".sql"))) {
+      expect(read(file), rel(file)).not.toMatch(/INSERT\s+INTO\s+"?(tax_rates|tax_rules|shipping_methods|shipping_rates)"?/i);
+    }
+    expect(all.filter((p) => /seed/i.test(rel(p)))).toEqual([]);
+  });
+
+  it("la orden tiene dónde congelar el cálculo (pricing_snapshot) y el CHECK de totales sigue vigente", () => {
+    const orders = read(join(SRC, "db/schema/orders.ts"));
+    expect(orders).toMatch(/pricing_snapshot/);
+    expect(orders).toMatch(/orders_total_matches_parts/);
   });
 });
 

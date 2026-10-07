@@ -11,6 +11,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { PricingSnapshot } from "@/domain/checkout";
 import type { AddressSnapshot } from "@/types/address";
 import { orderStatusEnum } from "./enums";
 import { users } from "./users";
@@ -50,6 +51,12 @@ export const orders = pgTable(
     /** Snapshots: la dirección queda congelada en el pedido. */
     shippingAddress: jsonb("shipping_address").$type<AddressSnapshot>().notNull(),
     billingAddress: jsonb("billing_address").$type<AddressSnapshot>(),
+    /**
+     * Cálculo COMPLETO congelado al crear el pedido: moneda, subtotal, impuesto (nombre, tasa usada,
+     * si estaba incluido, redondeo), método y tarifa de envío, destino y total. Si mañana cambia una tarifa
+     * o la tasa, este pedido NO cambia. Pedidos anteriores a esta columna: NULL.
+     */
+    pricingSnapshot: jsonb("pricing_snapshot").$type<PricingSnapshot>(),
 
     carrier: text("carrier"),
     trackingNumber: text("tracking_number"),

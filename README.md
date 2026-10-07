@@ -69,7 +69,8 @@ Abrí <http://localhost:3000>. Rutas disponibles:
 | `/shop` | **Lee productos ACTIVOS desde PostgreSQL** (si no hay ninguno, "Próximamente") |
 | `/shop/[slug]` | **Ficha de producto desde PostgreSQL**: nombre, descripción, precio, imagen (si existe) y disponibilidad. Slug inexistente o inactivo → 404 |
 | `/cart` | **Carrito** (invitada o con sesión): líneas, cantidades, eliminar, subtotal y estado vacío |
-| `/checkout` | "Próximamente" |
+| `/checkout` | **Resumen del checkout**: destino, método de envío, subtotal, impuestos, envío y total (calculados en el servidor). Todavía sin pago ni orden |
+| `/admin/taxes`, `/admin/shipping` | **Impuestos** y **Envíos**: el equipo los ve; solo SUPER_ADMIN los cambia |
 | `/account/register`, `/account/login` | **Crear cuenta** (nombre, correo, teléfono opcional, contraseña y consentimientos) e **ingresar** |
 | `/account` | **Mi cuenta** (requiere sesión): editar datos, ver y cambiar consentimientos (con historial), cambiar contraseña y eliminar la cuenta |
 | `/account/orders` | "Próximamente" (requiere sesión) |
@@ -284,6 +285,27 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
   alternativo. La tienda las muestra sin optimizar (`unoptimized`) hasta que se defina el dominio del CDN en `next.config.ts`.
 - **Auditoría** (`audit_logs`): creación, edición (con lista de campos), cambios de precio/costo/moneda/stock (antes y después),
   publicar, ocultar, archivar, restaurar, eliminación, imágenes, variantes e inicios de sesión.
+
+## Impuestos, envíos y totales del checkout
+
+**No hay ninguna tasa ni tarifa precargada** (ni en el código ni en las migraciones): todo se define en `/admin/taxes` y `/admin/shipping`.
+
+- **Subtotal** = Σ precio × cantidad de las líneas comprables. Los precios, el estado y el stock se **releen de PostgreSQL** (`getCartView`); nada llega del navegador.
+- **Impuesto** (tabla `tax_rates` + `tax_rules`): una tasa activa a la vez, en puntos básicos (13 % = 1300). Se configura si los precios publicados **ya lo incluyen** o **se suma** al pagar, y el
+  redondeo (por línea: al más cercano / abajo / arriba). Qué paga: reglas por **todos / categoría / producto (SKU)**, exento o sujeto; gana la más específica y, sin reglas, **nada** paga.
+  Con impuesto incluido: impuesto = precio − precio ÷ (1 + tasa) y el total no lo suma otra vez.
+- **Envío** (se reutilizan `shipping_methods` y `shipping_rates`): cada método (entrega o retiro) tiene tarifas por zona (país, provincia, ciudad, código postal; **país vacío = cualquier país**), con
+  rango de monto de pedido y **umbral de envío gratis**. Para un destino gana la tarifa más específica (a igual especificidad, la más barata); las zonas ignoran mayúsculas y tildes.
+  Los importes están en colones (**no hay conversión de moneda**: una tarifa en otra moneda no se usa).
+- **Total** = subtotal + impuesto + envío (con impuesto incluido: subtotal + envío). Mientras falte la dirección o el método, el envío **no muestra ningún valor** y el total queda en "—".
+  Si hay productos no disponibles o sin stock suficiente, el checkout no calcula total.
+- **Un solo punto de cálculo:** `calculateCheckoutTotals()` (`src/server/services/checkout/totals.ts`, sobre las reglas puras de `src/domain/checkout.ts`). La URL del checkout solo trae
+  `pais`, `provincia`, `ciudad`, `cp` y `envio`; cualquier otro parámetro (total, impuesto, precio…) se ignora y una prueba lo impide.
+  La futura creación de la orden y el pago deberán llamar a esta MISMA función y usar `totals.total` y `totals.snapshot`.
+- **Snapshot de la orden:** `orders.pricing_snapshot` (jsonb, opcional) está listo para congelar moneda, subtotal, impuesto (nombre, **tasa usada**, si estaba incluido, redondeo), método y tarifa de
+  envío, destino y total. `toOrderAmounts()` lo convierte a las columnas de `orders` cumpliendo `total = subtotal + envío + impuesto` (con impuesto incluido, `subtotal` se guarda **neto**).
+  Aún no se escribe: no hay creación de órdenes en esta fase. Cambiar una tarifa o la tasa nunca altera un pedido ya creado.
+- **Preparado, no implementado:** tarifas por peso o rango de valor, impuestos distintos por país de destino, varios impuestos a la vez, conversión de moneda y tarifas de courier internacional.
 
 ## Carrito
 

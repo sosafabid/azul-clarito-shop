@@ -115,13 +115,20 @@ export default async function CartPage() {
             <p className="mt-3 text-sm text-ink/65">Los impuestos y el envío se calcularán en el siguiente paso.</p>
 
             <div className="mt-6 space-y-3">
-              {/* El checkout todavía no existe: el botón no lleva a ningún flujo falso. */}
-              <button type="button" disabled aria-disabled="true" aria-describedby="checkout-soon" className={`${buttonBase} cursor-not-allowed bg-navy/40 text-paper`}>
-                Continuar al checkout
-              </button>
-              <p id="checkout-soon" className="text-center text-sm font-semibold text-navy/80">
-                El checkout estará disponible próximamente.
-              </p>
+              {cart.hasIssues ? (
+                <>
+                  <button type="button" disabled aria-disabled="true" aria-describedby="checkout-blocked" className={`${buttonBase} cursor-not-allowed bg-navy/40 text-paper`}>
+                    Continuar al checkout
+                  </button>
+                  <p id="checkout-blocked" className="text-center text-sm font-semibold text-navy/80">
+                    Revisá los productos marcados para poder continuar.
+                  </p>
+                </>
+              ) : (
+                <Link href={routes.checkout} className={`${buttonBase} bg-navy text-paper hover:bg-ink`}>
+                  Continuar al checkout
+                </Link>
+              )}
               <Link href={routes.shop} className={`${buttonBase} border-2 border-navy text-navy hover:bg-navy hover:text-paper`}>
                 Seguir comprando
               </Link>

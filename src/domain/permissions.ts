@@ -22,6 +22,8 @@ export const PERMISSIONS = {
   "costs:read": ["SUPER_ADMIN", "STAFF"],
   "users:manage-roles": ["SUPER_ADMIN"],
   "audit:read": ["SUPER_ADMIN"],
+  // Impuestos y envíos (afectan lo que paga la clienta): ver = equipo; cambiar = solo SUPER_ADMIN.
+  "settings:read": ["SUPER_ADMIN", "STAFF"],
   "settings:write": ["SUPER_ADMIN"],
 } as const satisfies Record<string, readonly UserRole[]>;
 

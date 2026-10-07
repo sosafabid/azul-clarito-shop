@@ -15,4 +15,6 @@ export const adminNav: readonly NavItem[] = [
   { label: "Pedidos", href: routes.adminOrders },
   { label: "Inventario", href: routes.adminInventory },
   { label: "Clientes", href: routes.adminCustomers },
+  { label: "Impuestos", href: routes.adminTaxes },
+  { label: "Envíos", href: routes.adminShipping },
 ];

@@ -19,6 +19,8 @@ export const routes = {
   adminProductDelete: (id: string) => `/admin/products/${encodeURIComponent(id)}/eliminar`,
   adminOrders: "/admin/orders",
   adminInventory: "/admin/inventory",
+  adminTaxes: "/admin/taxes",
+  adminShipping: "/admin/shipping",
   adminCustomers: "/admin/customers",
 } as const;
 
