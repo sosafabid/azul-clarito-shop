@@ -2,6 +2,7 @@ export const ORDER_STATUSES = [
   "PENDING",
   "PAID",
   "PREPARING",
+  "PACKED",
   "SHIPPED",
   "DELIVERED",
   "CANCELLED",
@@ -12,6 +13,8 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 /**
  * Transiciones permitidas entre estados de un pedido.
  *
+ * Envío MANUAL: pagado → preparando → empacado → enviado (tracking anotado a mano en `orders.tracking_number`) → entregado.
+ *
  * PROPUESTA INICIAL — conviene validarla con management antes de implementar
  * el flujo real (por ejemplo: ¿se puede cancelar un pedido ya pagado? Aquí sí,
  * pero implica gestionar el reembolso).
@@ -19,7 +22,8 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export const ORDER_STATUS_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
   PENDING: ["PAID", "CANCELLED"],
   PAID: ["PREPARING", "CANCELLED", "REFUNDED"],
-  PREPARING: ["SHIPPED", "CANCELLED", "REFUNDED"],
+  PREPARING: ["PACKED", "CANCELLED", "REFUNDED"],
+  PACKED: ["SHIPPED", "CANCELLED", "REFUNDED"],
   SHIPPED: ["DELIVERED", "REFUNDED"],
   DELIVERED: ["REFUNDED"],
   CANCELLED: [],

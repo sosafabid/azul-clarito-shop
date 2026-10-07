@@ -36,6 +36,20 @@
       "when": 1791344394241,
       "tag": "0004_tax_and_shipping_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791347012158,
+      "tag": "0005_shipping_zone_name_and_packed_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791347013262,
+      "tag": "0006_default_national_shipping_method",
+      "breakpoints": true
     }
   ]
 }

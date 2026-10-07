@@ -49,13 +49,13 @@ export async function saveShippingRate(db: Database, methodId: string, rateId: s
   const [method] = await db.select({ id: shippingMethods.id }).from(shippingMethods).where(eq(shippingMethods.id, methodId)).limit(1);
   if (!method) return { ok: false, message: "Método no encontrado." };
   const values = {
-    countryCode: input.countryCode, stateProvince: input.stateProvince, city: input.city, postalCode: input.postalCode, price: input.price, currency: "CRC",
+    countryCode: input.countryCode, zoneName: input.zoneName, stateProvince: input.stateProvince, city: input.city, postalCode: input.postalCode, price: input.price, currency: "CRC",
     minOrderAmount: input.minOrderAmount, maxOrderAmount: input.maxOrderAmount, freeShippingThreshold: input.freeShippingThreshold, isActive: input.active,
   };
   const id = rateId && isUuid(rateId) ? rateId : crypto.randomUUID();
   await db.batch([
     rateId && isUuid(rateId) ? db.update(shippingRates).set(values).where(eq(shippingRates.id, rateId)) : db.insert(shippingRates).values({ id, methodId, ...values }),
-    auditInsert(db, actor, [{ action: "shipping.rate_saved", entityType: "shipping_rate", entityId: id, metadata: { methodId, country: input.countryCode, province: input.stateProvince, city: input.city, price: input.price, freeThreshold: input.freeShippingThreshold, created: !rateId } }]),
+    auditInsert(db, actor, [{ action: "shipping.rate_saved", entityType: "shipping_rate", entityId: id, metadata: { methodId, zone: input.zoneName, province: input.stateProvince, city: input.city, price: input.price, freeThreshold: input.freeShippingThreshold, created: !rateId } }]),
   ]);
   return { ok: true };
 }

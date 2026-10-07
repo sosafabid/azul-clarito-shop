@@ -11,12 +11,15 @@ describe("estados de pedido", () => {
   it("permite el camino feliz completo", () => {
     expect(canTransitionOrder("PENDING", "PAID")).toBe(true);
     expect(canTransitionOrder("PAID", "PREPARING")).toBe(true);
-    expect(canTransitionOrder("PREPARING", "SHIPPED")).toBe(true);
+    expect(canTransitionOrder("PREPARING", "PACKED")).toBe(true);
+    expect(canTransitionOrder("PACKED", "SHIPPED")).toBe(true);
     expect(canTransitionOrder("SHIPPED", "DELIVERED")).toBe(true);
   });
 
   it("no permite saltarse pasos ni retroceder", () => {
     expect(canTransitionOrder("PENDING", "SHIPPED")).toBe(false);
+    expect(canTransitionOrder("PREPARING", "SHIPPED")).toBe(false); // hay que pasar por "empacado"
+    expect(canTransitionOrder("PACKED", "DELIVERED")).toBe(false);
     expect(canTransitionOrder("DELIVERED", "PENDING")).toBe(false);
     expect(() => assertOrderTransition("PENDING", "DELIVERED")).toThrow(/no permitida/);
   });

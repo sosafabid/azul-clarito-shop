@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeTotals, toOrderAmounts, type MethodInput, type TaxConfig, type TotalsLineInput } from "./checkout";
+import { computeTotals, pickNationalMethod, toOrderAmounts, type MethodInput, type TaxConfig, type TotalsLineInput } from "./checkout";
 import type { Destination, RateCandidate } from "./shipping";
 import { divideRounded, isTaxable, lineTax, parsePercentToBps } from "./tax";
 
@@ -134,37 +134,59 @@ describe("impuestos", () => {
   });
 });
 
-describe("envío", () => {
-  it("sin dirección: no se muestra un valor inventado", () => {
+describe("envío (solo Costa Rica, un único 'Envío nacional')", () => {
+  it("sin provincia: no se muestra un valor inventado, pero sí el método (nombre y descripción)", () => {
     const t = calc({ destination: null, selectedMethodId: null });
     expect(t.shipping.state).toBe("needs_destination");
     expect(t.shipping.amount).toBeNull();
+    expect(t.shipping.method?.name).toBe("Envío estándar");
     expect(t.total).toBeNull();
     expect(t.totalBeforeShipping).toBe(10_000);
   });
-  it("con dirección pero sin elegir método", () => {
+  it("con provincia, el único método se aplica solo (la clienta no elige couriers)", () => {
     const t = calc({ selectedMethodId: null });
-    expect(t.shipping.state).toBe("needs_method");
-    expect(t.shipping.options).toHaveLength(1);
-    expect(t.total).toBeNull();
-  });
-  it("método elegido: total completo y snapshot", () => {
-    const t = calc();
     expect(t.shipping.state).toBe("selected");
+    expect(t.shipping.options).toHaveLength(1);
     expect(t.total).toBe(12_500);
     expect(t.canProceed).toBe(true);
     expect(t.snapshot?.shipping).toMatchObject({ methodId: "m1", amount: 2_500, freeApplied: false });
   });
-  it("método inexistente / no disponible para el destino", () => {
+  it("el BACKEND rechaza cualquier país distinto de Costa Rica (aunque la pantalla no lo permita)", () => {
+    for (const country of ["US", "MX", "ES", "cr-x"]) {
+      const t = calc({ destination: { country, province: "San José", city: null, postalCode: null } });
+      expect(t.shipping.state).toBe("unsupported_country");
+      expect(t.shipping.options).toHaveLength(0);
+      expect(t.total).toBeNull();
+      expect(t.snapshot).toBeNull();
+      expect(t.canProceed).toBe(false);
+    }
+    expect(calc({ destination: { ...CR, country: "cr" } }).shipping.state).toBe("selected");
+  });
+  it("un método pedido por el navegador que no es el nacional se rechaza", () => {
     const t = calc({ selectedMethodId: "no-existe" });
     expect(t.shipping.selectionInvalid).toBe(true);
     expect(t.total).toBeNull();
     expect(t.canProceed).toBe(false);
   });
-  it("destino sin ninguna tarifa: no hay envío disponible", () => {
-    const t = calc({ destination: { country: "JP", province: null, city: null, postalCode: null } });
-    expect(t.shipping.state).toBe("unavailable");
+  it("sin tarifa configurada para el destino: 'no configurado' (no 'no disponible'), y el método sigue visible", () => {
+    const t = calc({ methods: [method({}, [rate({ stateProvince: "Limón" })])] });
+    expect(t.shipping.state).toBe("not_configured");
+    expect(t.shipping.method?.name).toBe("Envío estándar");
     expect(t.total).toBeNull();
+  });
+  it("método sin ninguna tarifa (recién creado): no configurado", () => expect(calc({ methods: [method({}, [])] }).shipping.state).toBe("not_configured"));
+  it("sin ningún método activo: no hay método y no hay envío configurado", () => {
+    const t = calc({ methods: [] });
+    expect(t.shipping.method).toBeNull();
+    expect(t.shipping.state).toBe("not_configured");
+    expect(t.total).toBeNull();
+  });
+  it("aunque haya varios métodos, solo se ofrece UNO: el primero de entrega a domicilio por prioridad; el retiro no se ofrece", () => {
+    const pickup = method({ id: "m2", code: "retiro", name: "Retiro", type: "PICKUP", sortOrder: -5 }, [rate({ id: "r2", methodId: "m2", price: 0 })]);
+    const second = method({ id: "m3", code: "otro", name: "Otro envío", sortOrder: 5 }, [rate({ id: "r3", methodId: "m3", price: 1 })]);
+    const t = calc({ methods: [second, pickup, method()], selectedMethodId: null });
+    expect(t.shipping.options.map((o) => o.code)).toEqual(["estandar"]);
+    expect(t.total).toBe(12_500);
   });
   it("envío gratis al llegar al umbral configurado", () => {
     const m = method({}, [rate({ freeShippingThreshold: 10_000 })]);
@@ -173,42 +195,47 @@ describe("envío", () => {
     expect(calc({ methods: [m] }).total).toBe(10_000);
   });
   it("rango de monto de pedido (mínimo y máximo)", () => {
-    const m = method({}, [rate({ minOrderAmount: 20_000 })]);
-    expect(calc({ methods: [m] }).shipping.state).toBe("unavailable");
-    const capped = method({}, [rate({ maxOrderAmount: 5_000 })]);
-    expect(calc({ methods: [capped] }).shipping.state).toBe("unavailable");
+    expect(calc({ methods: [method({}, [rate({ minOrderAmount: 20_000 })])] }).shipping.state).toBe("not_configured");
+    expect(calc({ methods: [method({}, [rate({ maxOrderAmount: 5_000 })])] }).shipping.state).toBe("not_configured");
   });
-  it("la tarifa más específica gana: provincia > país", () => {
-    const m = method({}, [rate({ id: "pais", price: 3_000 }), rate({ id: "sj", stateProvince: "San José", price: 1_500 })]);
-    expect(calc({ methods: [m] }).shipping.selected?.amount).toBe(1_500);
-    expect(calc({ methods: [m], destination: { ...CR, province: "Limón" } }).shipping.selected?.amount).toBe(3_000);
+  it("la tarifa más específica gana: cantón > provincia > todo el país", () => {
+    const m = method({}, [rate({ id: "pais", price: 3_000 }), rate({ id: "sj", stateProvince: "San José", price: 1_500 }), rate({ id: "esc", stateProvince: "San José", city: "Escazú", price: 900 })]);
+    expect(calc({ methods: [m] }).shipping.selected?.amount).toBe(900);
+    expect(calc({ methods: [m], destination: { ...CR, city: "Desamparados" } }).shipping.selected?.amount).toBe(1_500);
+    expect(calc({ methods: [m], destination: { ...CR, province: "Limón", city: null } }).shipping.selected?.amount).toBe(3_000);
+  });
+  it("zonas como Limón / GAM / resto del país: cada una con su propia tarifa configurable", () => {
+    const m = method({}, [
+      rate({ id: "limon", stateProvince: "Limón", price: 4_000 }),
+      rate({ id: "gam", stateProvince: "San José; Heredia", city: "Escazú; Santa Ana; Heredia", price: 2_000 }),
+      rate({ id: "resto", price: 6_000 }),
+    ]);
+    const at = (province: string, city: string | null) => calc({ methods: [m], destination: { country: "CR", province, city, postalCode: null } }).shipping.selected?.amount;
+    expect(at("Limón", "Pococí")).toBe(4_000);
+    expect(at("San José", "Escazú")).toBe(2_000);
+    expect(at("Heredia", "heredia")).toBe(2_000);
+    expect(at("San José", "Pérez Zeledón")).toBe(6_000); // fuera de la lista de cantones → resto del país
+    expect(at("Guanacaste", null)).toBe(6_000);
   });
   it("las zonas ignoran mayúsculas y tildes", () => {
     const m = method({}, [rate({ stateProvince: "san jose", price: 1_500 })]);
     expect(calc({ methods: [m] }).shipping.selected?.amount).toBe(1_500);
   });
-  it("internacional: tarifa 'cualquier país' y tarifa por país", () => {
-    const m = method({}, [rate({ id: "resto", countryCode: null, price: 20_000 }), rate({ id: "us", countryCode: "US", price: 15_000 })]);
-    const us = { country: "US", province: null, city: null, postalCode: null };
-    const fr = { country: "FR", province: null, city: null, postalCode: null };
-    expect(calc({ methods: [m], destination: us }).shipping.selected?.amount).toBe(15_000);
-    expect(calc({ methods: [m], destination: fr }).shipping.selected?.amount).toBe(20_000);
-  });
-  it("una tarifa en otra moneda no se usa (no hay conversión)", () => {
-    const m = method({}, [rate({ currency: "USD" })]);
-    expect(calc({ methods: [m] }).shipping.state).toBe("unavailable");
-  });
+  it("una tarifa en otra moneda no se usa (no hay conversión)", () => expect(calc({ methods: [method({}, [rate({ currency: "USD" })])] }).shipping.state).toBe("not_configured"));
   it("cambio de tarifa: otro costo (y un snapshot anterior no cambia)", () => {
     const before = calc();
     const after = calc({ methods: [method({}, [rate({ price: 4_000 })])] });
     expect(before.snapshot?.shipping.amount).toBe(2_500);
     expect(after.total).toBe(14_000);
   });
-  it("métodos ordenados por prioridad y retiro con costo 0", () => {
-    const pickup = method({ id: "m2", code: "retiro", name: "Retiro", type: "PICKUP", sortOrder: -1 }, [rate({ id: "r2", methodId: "m2", price: 0 })]);
-    const t = calc({ methods: [method(), pickup], selectedMethodId: null });
-    expect(t.shipping.options.map((o) => o.code)).toEqual(["retiro", "estandar"]);
-    expect(calc({ methods: [method(), pickup], selectedMethodId: "m2" }).total).toBe(10_000);
+  it("pickNationalMethod: solo entrega a domicilio; sin ninguna, no hay método", () => {
+    expect(pickNationalMethod([])).toBeNull();
+    expect(pickNationalMethod([method({ type: "PICKUP" })])).toBeNull();
+    expect(pickNationalMethod([method({ id: "b", name: "B", sortOrder: 2 }), method({ id: "a", name: "A", sortOrder: 1 })])?.id).toBe("a");
+  });
+  it("Total = subtotal + impuesto + envío", () => {
+    const t = calc({ tax: tax({ rateBps: 1300 }) });
+    expect(t.total).toBe(t.subtotal + t.tax.amount + (t.shipping.amount ?? 0));
   });
 });
 

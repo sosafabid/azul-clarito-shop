@@ -5,7 +5,7 @@ import { Notice } from "@/components/ui/Notice";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { formatMoney } from "@/domain/money";
 import { can } from "@/domain/permissions";
-import { COUNTRY_CODES, CR_PROVINCES, SHIPPING_TYPES, SHIPPING_TYPE_LABELS, countryName } from "@/domain/shipping";
+import { CR_PROVINCES, SHIPPING_TYPES, SHIPPING_TYPE_LABELS } from "@/domain/shipping";
 import { deleteShippingRateAction, saveShippingMethodAction, saveShippingRateAction, toggleShippingMethodAction, toggleShippingRateAction } from "@/server/actions/settings";
 import { requirePermission } from "@/server/auth";
 import { listShippingAdmin } from "@/server/services/settings/shipping";
@@ -33,11 +33,11 @@ function MethodFields({ method }: { method?: ShippingMethod }) {
 function RateFields({ rate }: { rate?: ShippingRate }) {
   return (
     <div className="grid gap-3 sm:grid-cols-4">
-      <Fld label="País" hint="Código (CR, US…) o vacío = cualquier país"><input name="country" list="paises" defaultValue={rate?.countryCode ?? ""} maxLength={2} className={inputClass} /></Fld>
-      <Fld label="Provincia / zona"><input name="province" list="provincias" defaultValue={rate?.stateProvince ?? ""} className={inputClass} /></Fld>
-      <Fld label="Ciudad / cantón"><input name="city" defaultValue={rate?.city ?? ""} className={inputClass} /></Fld>
+      <Fld label="Nombre de la zona" hint="Solo para el panel (ej. GAM, Limón, Resto del país)"><input name="zoneName" defaultValue={rate?.zoneName ?? ""} maxLength={60} className={inputClass} /></Fld>
+      <Fld label="Provincia(s)" hint="Vacío = todo el país. Varias: separalas con ;"><input name="province" list="provincias" defaultValue={rate?.stateProvince ?? ""} className={inputClass} /></Fld>
+      <Fld label="Cantón(es) / ciudad(es)" hint="Vacío = todos. Varios: separalos con ;"><input name="city" defaultValue={rate?.city ?? ""} className={inputClass} /></Fld>
       <Fld label="Código postal"><input name="postalCode" defaultValue={rate?.postalCode ?? ""} className={inputClass} /></Fld>
-      <Fld label="Precio (₡) *"><input name="price" defaultValue={rate ? String(rate.price) : ""} inputMode="numeric" required className={inputClass} /></Fld>
+      <Fld label="Precio (₡) *" hint="Lo que paga la clienta"><input name="price" defaultValue={rate ? String(rate.price) : ""} inputMode="numeric" required className={inputClass} /></Fld>
       <Fld label="Pedido mínimo (₡)"><input name="minOrder" defaultValue={money(rate?.minOrderAmount ?? null)} inputMode="numeric" className={inputClass} /></Fld>
       <Fld label="Pedido máximo (₡)"><input name="maxOrder" defaultValue={money(rate?.maxOrderAmount ?? null)} inputMode="numeric" className={inputClass} /></Fld>
       <Fld label="Envío gratis desde (₡)"><input name="freeThreshold" defaultValue={money(rate?.freeShippingThreshold ?? null)} inputMode="numeric" className={inputClass} /></Fld>
@@ -58,15 +58,19 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
       <div>
         <h1 className="text-3xl font-bold">Envíos</h1>
         <p className="mt-1 text-sm text-ink/70">
-          Cada método tiene tarifas por zona. Para un destino se usa la tarifa más específica (código postal, ciudad, provincia, país, cualquier país) dentro de su rango de pedido. No hay tarifas
-          precargadas. Los importes están en colones (la tienda todavía no convierte monedas).
+          Por ahora se envía <strong>solo dentro de Costa Rica</strong> y la logística es manual (vos preparás el paquete y lo llevás a Correos de Costa Rica u otro servicio; el seguimiento lo anotás en el pedido).
+          La clienta ve un único método, <strong>&ldquo;Envío nacional&rdquo;</strong>: el primero <strong>activo</strong> de tipo <em>Entrega a domicilio</em> (por prioridad). Podés cambiar su nombre y descripción acá.
+          Los métodos de <em>Retiro en persona</em> todavía no se ofrecen en el checkout.
+        </p>
+        <p className="mt-2 text-sm text-ink/70">
+          Cada método tiene tarifas por zona: provincia(s), cantón(es) o código postal; sin zona = todo el país. Gana la más específica dentro de su rango de pedido. Una zona como la GAM se arma
+          listando sus cantones separados por <code>;</code>. Los montos los definís vos (no hay ninguno precargado), en colones; el costo real del courier es interno y nunca se muestra a la clienta.
         </p>
       </div>
       {saved && <Notice tone="success">{saved}</Notice>}
       {error && <Notice tone="error">{error}</Notice>}
       {!canWrite && <Notice>Podés ver la configuración. Solo un SUPER_ADMIN puede cambiarla.</Notice>}
       <datalist id="provincias">{CR_PROVINCES.map((p) => <option key={p} value={p} />)}</datalist>
-      <datalist id="paises">{COUNTRY_CODES.map((c) => <option key={c} value={c} label={countryName(c)} />)}</datalist>
 
       {methods.length === 0 && <section className={card}><p className="text-sm text-ink/75">Todavía no hay métodos de envío: en el checkout se mostrará que no hay envíos disponibles.</p></section>}
 
@@ -86,7 +90,7 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
                 <li key={rate.id} className="rounded-2xl border border-celeste p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3 text-sm">
                     <p>
-                      <strong className="text-navy">{[rate.countryCode ? countryName(rate.countryCode) : "Cualquier país", rate.stateProvince, rate.city, rate.postalCode].filter(Boolean).join(" · ")}</strong>
+                      <strong className="text-navy">{([rate.zoneName, rate.stateProvince, rate.city, rate.postalCode].filter(Boolean).join(" · ") || "Todo Costa Rica")}</strong>
                       {" — "}{formatMoney(rate.price, "CRC")}
                       {rate.freeShippingThreshold !== null && ` · gratis desde ${formatMoney(rate.freeShippingThreshold, "CRC")}`}
                       {(rate.minOrderAmount !== null || rate.maxOrderAmount !== null) && ` · pedido ${rate.minOrderAmount !== null ? `desde ${formatMoney(rate.minOrderAmount, "CRC")}` : ""}${rate.maxOrderAmount !== null ? ` hasta ${formatMoney(rate.maxOrderAmount, "CRC")}` : ""}`}

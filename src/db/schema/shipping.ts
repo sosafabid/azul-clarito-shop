@@ -36,9 +36,13 @@ export const shippingRates = pgTable(
     methodId: uuid("method_id")
       .notNull()
       .references(() => shippingMethods.id, { onDelete: "cascade" }),
-    /** NULL = cualquier país (tarifa "resto del mundo"). */
+    /** Por ahora siempre CR. NULL = cualquier país (reservado para envíos internacionales futuros). */
     countryCode: char("country_code", { length: 2 }),
+    /** Nombre de la zona para el panel (GAM, Limón, Resto del país…). No afecta el cálculo. */
+    zoneName: text("zone_name"),
+    /** Una o varias provincias separadas por ";" (vacío = todas). */
     stateProvince: text("state_province"),
+    /** Uno o varios cantones/ciudades separados por ";" (vacío = todos). */
     city: text("city"),
     postalCode: text("postal_code"),
     price: money("price").notNull(),

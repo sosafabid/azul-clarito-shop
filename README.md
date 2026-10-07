@@ -69,7 +69,7 @@ Abrí <http://localhost:3000>. Rutas disponibles:
 | `/shop` | **Lee productos ACTIVOS desde PostgreSQL** (si no hay ninguno, "Próximamente") |
 | `/shop/[slug]` | **Ficha de producto desde PostgreSQL**: nombre, descripción, precio, imagen (si existe) y disponibilidad. Slug inexistente o inactivo → 404 |
 | `/cart` | **Carrito** (invitada o con sesión): líneas, cantidades, eliminar, subtotal y estado vacío |
-| `/checkout` | **Resumen del checkout**: destino, método de envío, subtotal, impuestos, envío y total (calculados en el servidor). Todavía sin pago ni orden |
+| `/checkout` | **Resumen del checkout**: provincia/cantón (país fijo Costa Rica), "Envío nacional", subtotal, impuestos, envío y total (calculados en el servidor). Todavía sin pago ni orden |
 | `/admin/taxes`, `/admin/shipping` | **Impuestos** y **Envíos**: el equipo los ve; solo SUPER_ADMIN los cambia |
 | `/account/register`, `/account/login` | **Crear cuenta** (nombre, correo, teléfono opcional, contraseña y consentimientos) e **ingresar** |
 | `/account` | **Mi cuenta** (requiere sesión): editar datos, ver y cambiar consentimientos (con historial), cambiar contraseña y eliminar la cuenta |
@@ -294,9 +294,15 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
 - **Impuesto** (tabla `tax_rates` + `tax_rules`): una tasa activa a la vez, en puntos básicos (13 % = 1300). Se configura si los precios publicados **ya lo incluyen** o **se suma** al pagar, y el
   redondeo (por línea: al más cercano / abajo / arriba). Qué paga: reglas por **todos / categoría / producto (SKU)**, exento o sujeto; gana la más específica y, sin reglas, **nada** paga.
   Con impuesto incluido: impuesto = precio − precio ÷ (1 + tasa) y el total no lo suma otra vez.
-- **Envío** (se reutilizan `shipping_methods` y `shipping_rates`): cada método (entrega o retiro) tiene tarifas por zona (país, provincia, ciudad, código postal; **país vacío = cualquier país**), con
-  rango de monto de pedido y **umbral de envío gratis**. Para un destino gana la tarifa más específica (a igual especificidad, la más barata); las zonas ignoran mayúsculas y tildes.
-  Los importes están en colones (**no hay conversión de moneda**: una tarifa en otra moneda no se usa).
+- **Envío — solo Costa Rica y logística manual.** Por ahora la tienda envía **únicamente dentro de Costa Rica**: el checkout muestra el país fijo (sin selector), pide provincia (de las 7),
+  cantón y código postal opcional, y el **servidor rechaza cualquier otro país** (`parseDestination` y el motor `computeTotals`). No hay integración con Correos de Costa Rica ni con ningún courier:
+  se prepara el paquete, se lleva al servicio que corresponda y el seguimiento se anota a mano en el pedido (`orders.carrier`, `tracking_number`, `tracking_url`, `shipped_at`, `internal_notes`;
+  estados PAGADO → PREPARANDO → EMPACADO → ENVIADO → ENTREGADO). La clienta ve **un único método, "Envío nacional"**, con la tarifa que Azul Clarito configure: es el primer método **activo** de tipo
+  *Entrega a domicilio* (por prioridad); su nombre y descripción se editan en `/admin/shipping` (la migración 0006 lo crea, sin tarifas, solo si no hay ningún método). Los de *Retiro en persona* todavía no se ofrecen.
+  **Tarifas** (`shipping_rates`) por zona: provincia(s), cantón(es) o código postal, con **nombre de zona** (GAM, Limón, Resto del país…) y varios valores separados por `;` (así la GAM se arma
+  listando sus cantones); sin zona = todo el país. Rango de monto de pedido y **umbral de envío gratis** opcionales. Gana la tarifa más específica (a igual especificidad, la más barata); las zonas ignoran
+  mayúsculas y tildes. **No hay ningún monto ni zona precargados**: se ingresan desde el panel (colones; sin conversión). Si falta tarifa para el destino: *"El envío para este destino todavía no está configurado."*
+  (nunca "no disponible"). El costo real del courier es interno y no se muestra a la clienta.
 - **Total** = subtotal + impuesto + envío (con impuesto incluido: subtotal + envío). Mientras falte la dirección o el método, el envío **no muestra ningún valor** y el total queda en "—".
   Si hay productos no disponibles o sin stock suficiente, el checkout no calcula total.
 - **Un solo punto de cálculo:** `calculateCheckoutTotals()` (`src/server/services/checkout/totals.ts`, sobre las reglas puras de `src/domain/checkout.ts`). La URL del checkout solo trae
@@ -305,7 +311,7 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
 - **Snapshot de la orden:** `orders.pricing_snapshot` (jsonb, opcional) está listo para congelar moneda, subtotal, impuesto (nombre, **tasa usada**, si estaba incluido, redondeo), método y tarifa de
   envío, destino y total. `toOrderAmounts()` lo convierte a las columnas de `orders` cumpliendo `total = subtotal + envío + impuesto` (con impuesto incluido, `subtotal` se guarda **neto**).
   Aún no se escribe: no hay creación de órdenes en esta fase. Cambiar una tarifa o la tasa nunca altera un pedido ya creado.
-- **Preparado, no implementado:** tarifas por peso o rango de valor, impuestos distintos por país de destino, varios impuestos a la vez, conversión de moneda y tarifas de courier internacional.
+- **Preparado, no implementado:** envíos internacionales (la columna `country_code` y las tarifas por país existen, pero hoy todo se fuerza a Costa Rica), tarifas por peso, impuestos distintos por destino, varios impuestos a la vez, conversión de moneda, retiro en persona en el checkout, integración con Correos u otro courier.
 
 ## Carrito
 

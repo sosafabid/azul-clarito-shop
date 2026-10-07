@@ -35,24 +35,37 @@ describe("método de envío", () => {
 });
 
 describe("tarifa de envío", () => {
-  it("país, zona y montos", () => {
-    const r = parseShippingRateForm({ country: "cr", province: "San  José", price: "2.500", minOrder: "10000", freeThreshold: "50000", active: "on" });
-    expect(r).toMatchObject({ ok: true, data: { countryCode: "CR", stateProvince: "San José", price: 2500, minOrderAmount: 10000, freeShippingThreshold: 50000, active: true } });
+  it("zona, montos y país fijo (Costa Rica)", () => {
+    const r = parseShippingRateForm({ zoneName: "Limón", province: "Limón", price: "2.500", minOrder: "10000", freeThreshold: "50000", active: "on" });
+    expect(r).toMatchObject({ ok: true, data: { countryCode: "CR", zoneName: "Limón", stateProvince: "Limón", price: 2500, minOrderAmount: 10000, freeShippingThreshold: 50000, active: true } });
   });
-  it("'Cualquier país' = null", () => expect(parseShippingRateForm({ country: "", price: "20000" })).toMatchObject({ ok: true, data: { countryCode: null } }));
+  it("el país NO sale del formulario: aunque alguien mande otro, queda Costa Rica", () => {
+    expect(parseShippingRateForm({ country: "US", price: "100" })).toMatchObject({ ok: true, data: { countryCode: "CR" } });
+  });
+  it("una zona puede listar varias provincias o cantones separados por ';'", () => {
+    const r = parseShippingRateForm({ zoneName: "GAM", province: "San José; Heredia", city: "Escazú; Santa Ana ;Curridabat", price: "100" });
+    expect(r).toMatchObject({ ok: true, data: { zoneName: "GAM", stateProvince: "San José; Heredia", city: "Escazú; Santa Ana ;Curridabat" } });
+  });
+  it("sin zona = todo el país", () => expect(parseShippingRateForm({ price: "20000" })).toMatchObject({ ok: true, data: { stateProvince: null, city: null, postalCode: null, zoneName: null } }));
   it("errores", () => {
-    expect(parseShippingRateForm({ country: "ZZ", price: "1" }).ok).toBe(false);
-    expect(parseShippingRateForm({ country: "CR", price: "" }).ok).toBe(false);
-    expect(parseShippingRateForm({ country: "CR", price: "-5" }).ok).toBe(false);
-    expect(parseShippingRateForm({ country: "CR", price: "5", minOrder: "100", maxOrder: "50" }).ok).toBe(false);
+    expect(parseShippingRateForm({ price: "" }).ok).toBe(false);
+    expect(parseShippingRateForm({ price: "-5" }).ok).toBe(false);
+    expect(parseShippingRateForm({ price: "5", minOrder: "100", maxOrder: "50" }).ok).toBe(false);
   });
 });
 
-describe("destino que llega por la URL (no confiable)", () => {
-  it("normaliza", () => expect(parseDestination({ pais: "cr", provincia: "  San José ", ciudad: "Escazú" })).toEqual({ country: "CR", province: "San José", city: "Escazú", postalCode: null }));
-  it("país inválido → sin destino", () => {
-    for (const pais of ["", "ZZ", "CRX", "1", "--"]) expect(parseDestination({ pais })).toBeNull();
-    expect(parseDestination({})).toBeNull();
+describe("destino que llega por la URL (no confiable): solo Costa Rica", () => {
+  it("normaliza la provincia al nombre oficial y limpia la ciudad", () =>
+    expect(parseDestination({ provincia: "  san jose ", ciudad: "Escazú" })).toEqual({ destination: { country: "CR", province: "San José", city: "Escazú", postalCode: null }, countryRejected: false }));
+  it("pais=CR (o cr) es válido", () => {
+    expect(parseDestination({ pais: "CR", provincia: "Limón" }).destination?.country).toBe("CR");
+    expect(parseDestination({ pais: "cr", provincia: "limon" }).destination?.province).toBe("Limón");
   });
-  it("recorta y limpia caracteres de control", () => expect(parseDestination({ pais: "CR", ciudad: "a\u0000b" + "x".repeat(200) })?.city?.length).toBeLessThanOrEqual(80));
+  it("cualquier otro país se RECHAZA (request manipulada)", () => {
+    for (const pais of ["US", "MX", "ZZ", "CRX", "1", "--", "Costa Rica"]) expect(parseDestination({ pais, provincia: "San José" })).toEqual({ destination: null, countryRejected: true });
+  });
+  it("provincia ausente o que no existe en Costa Rica → todavía no hay destino", () => {
+    for (const provincia of [undefined, "", "Texas", "Cundinamarca"]) expect(parseDestination({ provincia })).toEqual({ destination: null, countryRejected: false });
+  });
+  it("recorta y limpia caracteres de control", () => expect(parseDestination({ provincia: "Limón", ciudad: "a\u0000b" + "x".repeat(200) }).destination?.city?.length).toBeLessThanOrEqual(80));
 });

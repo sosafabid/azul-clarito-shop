@@ -6,9 +6,8 @@ import { Container } from "@/components/ui/Container";
 import { Notice } from "@/components/ui/Notice";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
-import { isUuid } from "@/domain/ids";
 import { formatMoney, toCurrency } from "@/domain/money";
-import { COUNTRY_CODES, CR_PROVINCES, countryName, parseDestination } from "@/domain/shipping";
+import { COUNTRY_ONLY_MESSAGE, CR_PROVINCES, STORE_COUNTRY_NAME, parseDestination } from "@/domain/shipping";
 import { formatBps } from "@/domain/tax";
 import { cn } from "@/lib/utils";
 import { calculateCheckoutTotals } from "@/server/services/checkout/totals";
@@ -23,18 +22,19 @@ const row = "flex items-baseline justify-between gap-4";
 
 /**
  * CHECKOUT: resumen de la compra.
- * La URL solo trae el DESTINO y el MÉTODO elegido (pais, provincia, ciudad, cp, envio). Nunca montos: el subtotal,
- * el impuesto, el envío y el total salen de `calculateCheckoutTotals`, que lee todo de PostgreSQL.
+ *  - Se envía SOLO dentro de Costa Rica: el país es fijo (no hay selector) y el servidor RECHAZA cualquier otro.
+ *  - La URL solo trae el destino (provincia, ciudad, código postal). Nunca montos: el subtotal, el impuesto, el envío
+ *    y el total salen de `calculateCheckoutTotals`, que lo lee todo de PostgreSQL.
+ *  - El envío es un único método, "Envío nacional", con la tarifa que Azul Clarito configuró. La logística real es manual.
  * Todavía no hay pago ni orden: el botón final queda deshabilitado.
  */
-export default async function CheckoutPage({ searchParams }: { searchParams: Promise<{ pais?: string; provincia?: string; ciudad?: string; cp?: string; envio?: string }> }) {
+export default async function CheckoutPage({ searchParams }: { searchParams: Promise<{ pais?: string; provincia?: string; ciudad?: string; cp?: string }> }) {
   if (!isDatabaseConfigured()) {
     return <ComingSoon title="Finalizar compra" description="El proceso de compra todavía no está disponible." back={{ label: "Volver al carrito", href: routes.cart }} />;
   }
   const params = await searchParams;
-  const destination = parseDestination(params);
-  const methodId = params.envio && isUuid(params.envio) ? params.envio : null;
-  const { totals, cart } = await calculateCheckoutTotals(getDb(), { owner: await getCartOwner(), destination, shippingMethodId: methodId });
+  const { destination, countryRejected } = parseDestination(params);
+  const { totals, cart } = await calculateCheckoutTotals(getDb(), { owner: await getCartOwner(), destination, shippingMethodId: null });
   const currency = toCurrency(totals.currency);
   const money = (amount: number) => formatMoney(amount, currency);
 
@@ -51,6 +51,9 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   }
 
   const { shipping, tax } = totals;
+  const method = shipping.method;
+  // Un país distinto de Costa Rica (request manipulada) NUNCA recibe envío: se le explica en vez de pedirle la dirección de nuevo.
+  const countryProblem = countryRejected || shipping.state === "unsupported_country";
 
   return (
     <section className="bg-paper py-10 sm:py-14">
@@ -67,51 +70,51 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
         )}
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_24rem] lg:items-start">
-          <div className="space-y-6">
-            <form method="get" action={routes.checkout} className="space-y-6">
-              <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
-                <legend className="px-2 font-display text-xl font-bold text-navy">¿A dónde lo enviamos?</legend>
-                <datalist id="paises">{COUNTRY_CODES.map((c) => <option key={c} value={c} label={countryName(c)} />)}</datalist>
-                <datalist id="provincias">{CR_PROVINCES.map((p) => <option key={p} value={p} />)}</datalist>
-                <div className="mt-3 grid gap-4 sm:grid-cols-2">
-                  <label className="font-display text-sm font-bold text-navy">País (código, ej. CR)<input name="pais" list="paises" defaultValue={destination?.country ?? "CR"} maxLength={2} required className={`${input} mt-1.5 font-sans font-normal uppercase`} /></label>
-                  <label className="font-display text-sm font-bold text-navy">Provincia / región<input name="provincia" list="provincias" defaultValue={destination?.province ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
-                  <label className="font-display text-sm font-bold text-navy">Ciudad / cantón<input name="ciudad" defaultValue={destination?.city ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
-                  <label className="font-display text-sm font-bold text-navy">Código postal (opcional)<input name="cp" defaultValue={destination?.postalCode ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
+          <form method="get" action={routes.checkout} className="space-y-6">
+            <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
+              <legend className="px-2 font-display text-xl font-bold text-navy">¿A dónde lo enviamos?</legend>
+              <p className="mt-2 text-sm font-semibold text-navy">{COUNTRY_ONLY_MESSAGE}</p>
+              {countryRejected && <Notice tone="error" className="mt-3">No podemos enviar fuera de Costa Rica. Elegí una provincia del país.</Notice>}
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="font-display text-sm font-bold text-navy">
+                  País
+                  <p className="mt-1.5 rounded-xl border-2 border-celeste bg-celeste/20 px-3 py-2.5 font-sans font-normal text-ink">{STORE_COUNTRY_NAME}</p>
                 </div>
-                <p className="mt-3 text-xs text-ink/60">Con esto calculamos el envío. La dirección completa de entrega se pide en el siguiente paso.</p>
-              </fieldset>
+                <label className="font-display text-sm font-bold text-navy">
+                  Provincia / región
+                  <select name="provincia" required defaultValue={destination?.province ?? ""} className={`${input} mt-1.5 font-sans font-normal`}>
+                    <option value="" disabled>Elegí tu provincia</option>
+                    {CR_PROVINCES.map((province) => <option key={province} value={province}>{province}</option>)}
+                  </select>
+                </label>
+                <label className="font-display text-sm font-bold text-navy">Ciudad / cantón<input name="ciudad" defaultValue={destination?.city ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
+                <label className="font-display text-sm font-bold text-navy">Código postal (opcional)<input name="cp" defaultValue={destination?.postalCode ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
+              </div>
+              <p className="mt-3 text-xs text-ink/60">La dirección completa de entrega se pide en el siguiente paso.</p>
+            </fieldset>
 
-              <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
-                <legend className="px-2 font-display text-xl font-bold text-navy">Método de envío</legend>
-                {shipping.state === "needs_destination" && <p className="mt-2 text-sm text-ink/75">Seleccioná tu dirección para calcular el envío.</p>}
-                {shipping.state === "unavailable" && <p className="mt-2 text-sm font-semibold text-coral">Todavía no tenemos envíos disponibles a ese destino. Probá con otra dirección o escribinos.</p>}
-                {shipping.selectionInvalid && <p className="mt-2 text-sm font-semibold text-coral">El método que habías elegido ya no está disponible para este destino. Elegí otro.</p>}
-                {shipping.options.length > 0 && (
-                  <ul className="mt-3 space-y-2">
-                    {shipping.options.map((option) => (
-                      <li key={option.methodId}>
-                        <label className={cn("flex cursor-pointer items-start justify-between gap-4 rounded-2xl border-2 px-4 py-3", shipping.selected?.methodId === option.methodId ? "border-navy bg-celeste/40" : "border-celeste hover:border-aqua")}>
-                          <span className="flex items-start gap-3">
-                            <input type="radio" name="envio" value={option.methodId} defaultChecked={shipping.selected?.methodId === option.methodId} className="mt-1 size-5 accent-navy" />
-                            <span>
-                              <span className="block font-display font-bold text-navy">{option.name}</span>
-                              {option.description && <span className="block text-sm text-ink/70">{option.description}</span>}
-                              {option.estimatedDaysMin !== null && <span className="block text-xs text-ink/60">Entrega estimada: {option.estimatedDaysMin}{option.estimatedDaysMax !== null && option.estimatedDaysMax !== option.estimatedDaysMin ? `–${option.estimatedDaysMax}` : ""} días</span>}
-                            </span>
-                          </span>
-                          <span className="font-display font-bold text-navy">{option.free ? "Gratis" : money(option.amount)}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </fieldset>
-              <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">
-                {shipping.options.length > 0 ? "Actualizar resumen" : "Calcular envío"}
-              </button>
-            </form>
-          </div>
+            <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
+              <legend className="px-2 font-display text-xl font-bold text-navy">Envío</legend>
+              {method ? (
+                <div className="mt-2">
+                  <p className="font-display text-lg font-bold text-navy">{method.name}</p>
+                  {method.description && <p className="mt-1 text-sm leading-relaxed text-ink/75">{method.description}</p>}
+                </div>
+              ) : (
+                <p className="mt-2 text-sm font-semibold text-coral">El envío todavía no está configurado.</p>
+              )}
+              {method && countryProblem && <p className="mt-3 text-sm font-semibold text-coral">{COUNTRY_ONLY_MESSAGE}</p>}
+              {method && !countryProblem && shipping.state === "needs_destination" && <p className="mt-3 text-sm text-ink/75">Seleccioná tu provincia para ver el costo del envío.</p>}
+              {method && !countryProblem && shipping.state === "not_configured" && <p className="mt-3 text-sm font-semibold text-coral">El envío para este destino todavía no está configurado.</p>}
+              {method && shipping.state === "selected" && shipping.selected && (
+                <p className="mt-3 text-sm text-ink/75">
+                  Costo de envío: <strong className="text-navy">{shipping.selected.free ? "Gratis" : money(shipping.selected.amount)}</strong>
+                  {shipping.selected.estimatedDaysMin !== null && ` · Entrega estimada: ${shipping.selected.estimatedDaysMin}${shipping.selected.estimatedDaysMax !== null && shipping.selected.estimatedDaysMax !== shipping.selected.estimatedDaysMin ? `–${shipping.selected.estimatedDaysMax}` : ""} días`}
+                </p>
+              )}
+            </fieldset>
+            <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">Actualizar resumen</button>
+          </form>
 
           <aside className="rounded-3xl border border-celeste bg-celeste/20 p-6 lg:sticky lg:top-32" aria-label="Resumen de la compra">
             <h2 className="text-xl font-bold">Resumen</h2>
@@ -137,18 +140,19 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 <dd className="font-semibold">{tax.applied ? money(tax.amount) : "No aplican"}</dd>
               </div>
               <div className={row}>
-                <dt>Envío{shipping.selected ? ` (${shipping.selected.name})` : ""}</dt>
+                <dt>{method?.name ?? "Envío"}</dt>
                 <dd className="max-w-[12rem] text-right font-semibold">
-                  {shipping.state === "selected" && shipping.selected ? (shipping.selected.free ? "Gratis" : money(shipping.selected.amount))
-                    : shipping.state === "needs_destination" ? "Seleccioná tu dirección para calcular el envío"
-                    : shipping.state === "unavailable" ? "No disponible para ese destino" : "Elegí un método de envío"}
+                  {countryProblem ? COUNTRY_ONLY_MESSAGE
+                    : shipping.state === "selected" && shipping.selected ? (shipping.selected.free ? "Gratis" : money(shipping.selected.amount))
+                    : shipping.state === "needs_destination" ? "Seleccioná tu dirección para ver el costo del envío"
+                    : "El envío para este destino todavía no está configurado."}
                 </dd>
               </div>
               <div className={cn(row, "border-t border-celeste pt-3 text-base")}>
                 <dt className="font-display text-lg font-bold text-navy">Total</dt>
                 <dd className="font-display text-2xl font-bold text-navy">{totals.total !== null ? money(totals.total) : "—"}</dd>
               </div>
-              {totals.total === null && totals.blockers.length === 0 && <p className="text-xs text-ink/60">El total se calcula cuando elijas el envío.</p>}
+              {totals.total === null && totals.blockers.length === 0 && <p className="text-xs text-ink/60">El total aparece cuando el envío tenga costo para tu destino.</p>}
             </dl>
 
             <button type="button" disabled aria-disabled="true" aria-describedby="pay-soon" className="mt-6 inline-flex min-h-12 w-full cursor-not-allowed items-center justify-center rounded-full bg-navy/40 px-8 py-3 font-display font-bold text-paper">Continuar al pago</button>

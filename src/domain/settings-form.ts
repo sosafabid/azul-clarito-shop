@@ -1,6 +1,6 @@
 import { isUuid } from "./ids";
 import { parseMoneyInput } from "./money";
-import { SHIPPING_TYPES, isCountryCode, type ShippingType } from "./shipping";
+import { SHIPPING_TYPES, STORE_COUNTRY, type ShippingType } from "./shipping";
 import { slugify } from "./slug";
 import { TAX_ROUNDING_MODES, TAX_RULE_SCOPES, TAX_TREATMENTS, parsePercentToBps, type TaxRounding, type TaxRuleScope, type TaxTreatment } from "./tax";
 
@@ -86,7 +86,10 @@ export function parseShippingMethodForm(input: Input): FormResult<ParsedShipping
 }
 
 export type ParsedShippingRate = {
-  countryCode: string | null;
+  /** Siempre Costa Rica por ahora (el formulario ya no ofrece otros países). */
+  countryCode: string;
+  /** Nombre interno de la zona (p. ej. GAM, Limón, Resto del país). Solo para el panel. */
+  zoneName: string | null;
   stateProvince: string | null;
   city: string | null;
   postalCode: string | null;
@@ -99,9 +102,9 @@ export type ParsedShippingRate = {
 
 export function parseShippingRateForm(input: Input): FormResult<ParsedShippingRate> {
   const errors: Record<string, string> = {};
-  const country = text(input, "country").toUpperCase();
-  if (country !== "" && !isCountryCode(country)) errors.country = "Elegí un país de la lista (o dejá 'Cualquier país').";
+  // Zonas: se puede escribir una lista separada por ";" (p. ej. varios cantones). `max` es el largo total del texto.
   const zone = (key: string, max: number) => text(input, key).replace(/\s+/g, " ").slice(0, max) || null;
+  const zoneName = zone("zoneName", 60);
   // Los importes están en la moneda base de la tienda (colones): no hay conversión de moneda.
   const money = (key: string, required: boolean, label: string): number | null => {
     const raw = text(input, key);
@@ -119,7 +122,8 @@ export function parseShippingRateForm(input: Input): FormResult<ParsedShippingRa
   const free = money("freeThreshold", false, "Envío gratis desde");
   if (min !== null && max !== null && min > max) errors.maxOrder = "El pedido máximo no puede ser menor que el mínimo.";
   return done(errors, () => ({
-    countryCode: country === "" ? null : country, stateProvince: zone("province", 80), city: zone("city", 80), postalCode: zone("postalCode", 20),
+    // El país NO viene del formulario: por ahora solo se envía dentro de Costa Rica.
+    countryCode: STORE_COUNTRY, zoneName, stateProvince: zone("province", 300), city: zone("city", 400), postalCode: zone("postalCode", 100),
     price: price ?? 0, minOrderAmount: min, maxOrderAmount: max, freeShippingThreshold: free, active: input.active === "on",
   }));
 }

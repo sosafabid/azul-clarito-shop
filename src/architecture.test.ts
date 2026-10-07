@@ -265,7 +265,7 @@ describe("checkout, impuestos y envíos", () => {
     const source = stripComments(read(join(SRC, "app/(store)/checkout/page.tsx")));
     const declared = /searchParams: Promise<\{([^}]*)\}>/.exec(source)?.[1] ?? "";
     const names = [...declared.matchAll(/(\w+)\??:/g)].map((m) => m[1]).sort();
-    expect(names).toEqual(["ciudad", "cp", "envio", "pais", "provincia"]);
+    expect(names).toEqual(["ciudad", "cp", "pais", "provincia"]); // pais solo para RECHAZAR cualquier valor distinto de CR
     expect(source).toMatch(/calculateCheckoutTotals\(/);
     expect(source).not.toMatch(/name="(total|subtotal|impuesto|tax|precio|price|envioPrecio|shippingCost)"/i);
   });
@@ -308,8 +308,12 @@ describe("checkout, impuestos y envíos", () => {
   it("no se precargan impuestos ni tarifas: ninguna migración inserta en tax_* ni shipping_*", () => {
     const dir = join(process.cwd(), "drizzle");
     for (const file of walk(dir).filter((f) => f.endsWith(".sql"))) {
-      expect(read(file), rel(file)).not.toMatch(/INSERT\s+INTO\s+"?(tax_rates|tax_rules|shipping_methods|shipping_rates)"?/i);
+      expect(read(file), rel(file)).not.toMatch(/INSERT\s+INTO\s+"?(tax_rates|tax_rules|shipping_rates)"?/i);
     }
+    // Lo único que se precarga es el MÉTODO conceptual "Envío nacional", sin tarifas, y solo si no existe ningún método.
+    const defaults = walk(dir).filter((f) => f.endsWith(".sql") && /INSERT\s+INTO\s+"?shipping_methods"?/i.test(read(f)));
+    expect(defaults.length).toBe(1);
+    expect(read(defaults[0])).toMatch(/WHERE NOT EXISTS \(SELECT 1 FROM "shipping_methods"\)/);
     expect(all.filter((p) => /seed/i.test(rel(p)))).toEqual([]);
   });
 
@@ -317,6 +321,48 @@ describe("checkout, impuestos y envíos", () => {
     const orders = read(join(SRC, "db/schema/orders.ts"));
     expect(orders).toMatch(/pricing_snapshot/);
     expect(orders).toMatch(/orders_total_matches_parts/);
+  });
+});
+
+describe("envíos solo Costa Rica y logística manual", () => {
+  const publicFiles = () =>
+    all.filter((p) => ["src/app/(store)/", "src/components/shop/", "src/components/ui/", "src/components/layout/", "src/components/home/", "src/components/account/", "src/components/cart/"].some((prefix) => rel(p).startsWith(prefix)));
+
+  it("el checkout no tiene selector de países ni campo de país editable", () => {
+    const source = stripComments(read(join(SRC, "app/(store)/checkout/page.tsx")));
+    expect(source).not.toMatch(/name="pais"|COUNTRY_CODES|countryName|list="paises"|<datalist/);
+    expect(source).toMatch(/STORE_COUNTRY_NAME/);
+    expect(source).toMatch(/COUNTRY_ONLY_MESSAGE/);
+  });
+
+  it("el país se valida en el BACKEND: parseDestination y el motor rechazan todo lo que no sea Costa Rica", () => {
+    expect(stripComments(read(join(SRC, "domain/shipping.ts")))).toMatch(/countryRejected: true/);
+    expect(stripComments(read(join(SRC, "domain/checkout.ts")))).toMatch(/unsupported_country/);
+    expect(stripComments(read(join(SRC, "domain/settings-form.ts")))).toMatch(/countryCode: STORE_COUNTRY/);
+  });
+
+  it("no existe ninguna lista de países ni código de envíos internacionales", () => {
+    for (const file of all.filter((p) => !/\.test\.ts$/.test(p))) expect(stripComments(read(file)), rel(file)).not.toMatch(/COUNTRY_CODES|isCountryCode|countryName\(/);
+  });
+
+  it("el panel de tarifas ya no ofrece un campo de país", () => {
+    expect(stripComments(read(join(SRC, "app/admin/(panel)/shipping/page.tsx")))).not.toMatch(/name="country"|list="paises"/);
+  });
+
+  it("no hay integración con Correos ni con ningún courier (todo manual)", () => {
+    for (const file of all.filter((p) => !/\.test\.ts$/.test(p))) {
+      expect(stripComments(read(file)), rel(file)).not.toMatch(/correos\.go\.cr|api\.correos|dhl|fedex|ups\.com|trackingApi|createLabel|generateLabel/i);
+    }
+  });
+
+  it("el cliente no ve nombres de couriers: la interfaz pública habla de 'Envío nacional' manual", () => {
+    for (const file of publicFiles()) expect(stripComments(read(file)), rel(file)).not.toMatch(/\bcorreos de costa rica\b|\bcourier\b/i);
+  });
+
+  it("el flujo manual de la orden está previsto: estados, tracking, fecha de envío y notas internas", () => {
+    expect(read(join(SRC, "domain/order-status.ts"))).toMatch(/"PREPARING"[\s\S]*"PACKED"[\s\S]*"SHIPPED"[\s\S]*"DELIVERED"/);
+    const orders = read(join(SRC, "db/schema/orders.ts"));
+    for (const column of ["carrier", "tracking_number", "tracking_url", "shipped_at", "delivered_at", "internal_notes"]) expect(orders).toContain(column);
   });
 });
 
