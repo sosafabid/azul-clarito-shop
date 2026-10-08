@@ -64,6 +64,27 @@
       "when": 1791348780458,
       "tag": "0008_initial_national_shipping_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791495802532,
+      "tag": "0009_auth_tokens_and_throttle",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791497547549,
+      "tag": "0010_staff_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791497548696,
+      "tag": "0011_protect_last_super_admin",
+      "breakpoints": true
     }
   ]
 }

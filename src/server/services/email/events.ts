@@ -26,6 +26,14 @@ export type EmailEventMap = {
   order_cancelled: OrderEmailData;
   refund_issued: OrderEmailData & { refundAmount: number };
   admin_new_order: OrderEmailData & { customerEmail: string };
+  // ── Cuenta (autenticación) ──
+  /** `actionUrl` lleva el token de un solo uso: NUNCA se escribe en logs ni auditoría. */
+  email_verification: { name?: string | null; actionUrl: string; expiresHours: number };
+  password_reset: { name?: string | null; actionUrl: string; expiresMinutes: number };
+  /** Aviso de seguridad: la contraseña cambió (no contiene ninguna contraseña). */
+  password_changed: { name?: string | null };
+  /** Invitación al equipo. `actionUrl` lleva el token de un solo uso: NUNCA se escribe en logs ni auditoría. */
+  staff_invitation: { actionUrl: string; expiresHours: number; invitedByName?: string | null };
 };
 
 export type EmailEvent = keyof EmailEventMap;

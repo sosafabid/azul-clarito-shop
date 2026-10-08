@@ -9,6 +9,11 @@ export const routes = {
   accountOrders: "/account/orders",
   accountLogin: "/account/login",
   accountRegister: "/account/register",
+  forgotPassword: "/forgot-password",
+  resetPassword: "/reset-password",
+  resetSuccess: "/reset-success",
+  verifyEmail: "/verify-email",
+  verificationSuccess: "/verification-success",
   terms: "/terminos",
   privacy: "/privacidad",
   admin: "/admin",
@@ -22,6 +27,9 @@ export const routes = {
   adminTaxes: "/admin/taxes",
   adminShipping: "/admin/shipping",
   adminCustomers: "/admin/customers",
+  adminUsers: "/admin/users",
+  adminUser: (id: string) => `/admin/users/${encodeURIComponent(id)}`,
+  staffInvitation: "/staff-invitation",
 } as const;
 
 /** Páginas reales del sitio principal (azulclaritocr.com), para enlaces cruzados. */

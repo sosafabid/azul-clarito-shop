@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
     remotePatterns: [],
   },
   async headers() {
+    // Páginas con un enlace secreto en la URL: que no viaje en `Referer` a otros sitios ni se guarde en cachés.
+    const privateLinkHeaders = [
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "Cache-Control", value: "no-store, max-age=0" },
+    ];
     return [
       {
         source: "/:path*",
@@ -24,6 +29,9 @@ const nextConfig: NextConfig = {
           { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
         ],
       },
+      { source: "/reset-password", headers: privateLinkHeaders },
+      { source: "/verify-email", headers: privateLinkHeaders },
+      { source: "/staff-invitation", headers: privateLinkHeaders },
     ];
   },
 };

@@ -78,8 +78,8 @@ describe("frontera pública / privada", () => {
 
 describe("autorización en el servidor", () => {
   it("cada Server Action exige sesión/permiso ANTES de tocar la base de datos", () => {
-    // login / registro / logout y el carrito son públicos por naturaleza (se prueban aparte, abajo).
-    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts"));
+    // login / registro / logout, recuperación de cuenta y el carrito son públicos por naturaleza (se prueban aparte, abajo).
+    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts") && !rel(p).endsWith("/actions/recovery.ts") && !rel(p).endsWith("/actions/staff-invitations.ts"));
     expect(files.length).toBeGreaterThanOrEqual(4);
 
     for (const file of files) {
@@ -433,5 +433,157 @@ describe("secretos", () => {
       patterns.filter((re) => re.test(read(file))).map(() => rel(file)),
     );
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("verificación de correo y restablecimiento de contraseña", () => {
+  const code = (path: string) => stripComments(read(join(SRC, path)));
+
+  it("hay UN solo sistema de autenticación: no se agregó ninguna librería de auth", () => {
+    const pkg = JSON.parse(read(join(process.cwd(), "package.json"))) as { dependencies?: Record<string, string> };
+    const deps = Object.keys(pkg.dependencies ?? {});
+    expect(deps.filter((d) => /better-auth|next-auth|auth\.js|lucia|clerk|@neondatabase\/auth|passport/i.test(d))).toEqual([]);
+  });
+
+  it("la clave de Resend solo se lee en la configuración de servidor y nunca en código público", () => {
+    const readers = all.filter((p) => /optionalEnv\("RESEND_API_KEY"\)|requireEnv\("RESEND_API_KEY"\)|process\.env\.RESEND_API_KEY|process\.env\[["']RESEND_API_KEY/.test(stripComments(read(p)))).map(rel);
+    expect(readers).toEqual(["src/config/server.ts"]);
+    expect(all.filter((p) => /NEXT_PUBLIC_RESEND/.test(read(p)))).toEqual([]);
+    // los módulos de correo son solo de servidor
+    for (const file of ["server/services/email/resend.ts", "server/services/email/service.ts", "server/auth/tokens.ts", "server/auth/throttle.ts", "server/services/auth/recovery.ts"]) {
+      expect(read(join(SRC, file)).trimStart().startsWith('import "server-only"')).toBe(true);
+    }
+  });
+
+  it("los componentes de navegador nunca importan el servicio de correo, los tokens ni la configuración de servidor", () => {
+    const clients = all.filter((p) => read(p).trimStart().startsWith('"use client"'));
+    const bad = clients.filter((f) => importsOf(read(f)).some((imp) => /services\/email|server\/auth\/(tokens|throttle)|config\/server|services\/auth\/recovery/.test(imp)));
+    expect(bad.map(rel)).toEqual([]);
+  });
+
+  it("los tokens se guardan hasheados, vencen y se consumen de forma atómica (un solo uso)", () => {
+    const schema = code("db/schema/auth-tokens.ts");
+    expect(schema).toMatch(/tokenHash: text\("token_hash"\)\.notNull\(\)\.unique\(\)/);
+    expect(schema).toMatch(/expiresAt/);
+    expect(schema).toMatch(/usedAt/);
+    expect(schema).not.toMatch(/\btoken: text/);
+    const tokens = code("server/auth/tokens.ts");
+    expect(tokens).toMatch(/randomBytes\(32\)/);
+    expect(tokens).toMatch(/sha256/);
+    const recovery = code("server/services/auth/recovery.ts");
+    expect(recovery).toMatch(/used_at is null and expires_at > now\(\)/);
+    // el token del correo no se escribe en logs ni en la auditoría
+    expect(recovery).not.toMatch(/console\./);
+    expect(tokens).not.toMatch(/console\./);
+    expect(recovery).not.toMatch(/metadata:\s*\{[^}]*token/i);
+  });
+
+  it("restablecer la contraseña cierra TODAS las sesiones y anula los demás enlaces pendientes", () => {
+    const recovery = code("server/services/auth/recovery.ts");
+    expect(recovery).toMatch(/delete from sessions where user_id in \(select id from changed\)/);
+    expect(recovery).toMatch(/delete from auth_tokens/);
+    expect(recovery).toMatch(/failed_login_attempts = 0, locked_until = null/);
+  });
+
+  it("las acciones públicas de recuperación no reciben ids ni roles del formulario y limitan la frecuencia", () => {
+    const actions = code("server/actions/recovery.ts");
+    expect(actions).not.toMatch(/formData\.get\(["'](userId|id|user_id|role)["']\)/);
+    const service = code("server/services/auth/recovery.ts");
+    expect(service).toMatch(/allowAttempt\(/);
+    expect(service).toMatch(/RATE_LIMITS\./);
+    // el correo se envía DESPUÉS de responder (no altera el tiempo de respuesta)
+    expect(actions).toMatch(/after\(/);
+  });
+
+  it("'olvidé mi contraseña' responde siempre lo mismo (no revela si el correo existe)", () => {
+    const actions = code("server/actions/recovery.ts");
+    const forgot = actions.slice(actions.indexOf("export async function forgotPasswordAction"), actions.indexOf("export async function resetPasswordAction"));
+    expect(forgot).toMatch(/AUTH_MESSAGES\.forgotGeneric/);
+    // en esa acción no hay ramas que devuelvan otro mensaje según exista o no la cuenta
+    expect(forgot.match(/AUTH_MESSAGES\./g)?.length).toBe(2); // honeypot + respuesta normal, ambos genéricos
+  });
+
+  it("la URL de los enlaces sale de la configuración, jamás del encabezado Host de la petición", () => {
+    const recovery = code("server/services/auth/recovery.ts");
+    expect(recovery).toMatch(/serverConfig\.appBaseUrl/);
+    expect(recovery).not.toMatch(/headers\(\)|x-forwarded-host|\bhost\b/i);
+  });
+
+  it("la verificación de correo la procesa el servidor (Server Action), no un script del navegador", () => {
+    const actions = code("server/actions/recovery.ts");
+    expect(actions).toMatch(/confirmEmailVerification\(/);
+    const confirm = code("server/services/auth/recovery.ts");
+    expect(confirm).toMatch(/email_verified_at = coalesce/);
+  });
+
+  it("las páginas con enlace secreto no envían Referer ni se guardan en caché", () => {
+    const config = read(join(process.cwd(), "next.config.ts"));
+    expect(config).toMatch(/source: "\/reset-password"/);
+    expect(config).toMatch(/source: "\/verify-email"/);
+    expect(config).toMatch(/no-referrer/);
+    expect(config).toMatch(/no-store/);
+  });
+
+  it("el panel de clientes nunca lee hashes, intentos de ingreso ni tokens, (y solo SUPER_ADMIN lo consulta)", () => {
+    const service = code("server/services/customers/admin.ts");
+    expect(service).not.toMatch(/passwordHash|failedLoginAttempts|lockedUntil|authTokens|tokenHash/);
+    const page = code("app/admin/(panel)/customers/page.tsx");
+    expect(page).toMatch(/await requirePermission\("customers:read"\)/);
+    expect(page).not.toMatch(/passwordHash|tokenHash/);
+  });
+
+  it("Usuarios y roles: cada acción y página exige el permiso, y el rol nunca se lee del formulario", () => {
+    const actions = code("server/actions/users.ts");
+    const chunks = actions.split(/export async function /).slice(1);
+    expect(chunks.length).toBe(4);
+    for (const chunk of chunks) expect(chunk.slice(0, 200)).toMatch(/await requirePermission\("users:(manage-roles|invite)"\)/);
+    // la persona que actúa sale de la sesión
+    expect(actions).toMatch(/id: session\.userId, role: session\.role/);
+    expect(actions).not.toMatch(/formData\.get\("(actor|actorId|actorRole|callerRole)"\)/);
+    expect(code("app/admin/(panel)/users/page.tsx")).toMatch(/await requirePermission\("users:read"\)/);
+    expect(code("app/admin/(panel)/users/[id]/page.tsx")).toMatch(/await requirePermission\("users:manage-roles"\)/);
+  });
+
+  it("Usuarios y roles: el servicio no lee secretos y nada asigna SUPER_ADMIN ni acepta un rol desde el navegador en las rutas públicas", () => {
+    const service = code("server/services/users/admin.ts");
+    expect(service).not.toMatch(/passwordHash|failedLoginAttempts|lockedUntil|tokenHash|authTokens/);
+    expect(code("domain/user-admin.ts")).toMatch(/ASSIGNABLE_ROLES = \["STAFF", "CUSTOMER"\]/);
+    const accept = code("server/actions/staff-invitations.ts");
+    expect(accept).not.toMatch(/formData\.get\("role"\)/);
+    const register = code("server/actions/auth.ts");
+    expect(register).not.toMatch(/formData\.get\("role"\)/);
+    expect(register).not.toMatch(/role:\s*["']?(STAFF|SUPER_ADMIN)/);
+  });
+
+  it("la invitación a STAFF se guarda hasheada, vence, se consume una sola vez y asigna el rol en el servidor", () => {
+    const service = code("server/services/users/invitations.ts");
+    expect(service).toMatch(/hashToken\(token\)/);
+    expect(service).toMatch(/expires_at > now\(\)/);
+    expect(service).toMatch(/accepted_at is null/);
+    expect(service).toMatch(/'STAFF'/);
+    expect(code("db/schema/staff-invitations.ts")).not.toMatch(/\btoken:\s*text/);
+  });
+
+  it("la migración que protege a la última SUPER_ADMIN no modifica datos", () => {
+    const sql = read(join(process.cwd(), "drizzle/0011_protect_last_super_admin.sql"));
+    expect(sql).not.toMatch(/UPDATE\s+(users|"users")/i);
+    expect(sql).not.toMatch(/DELETE\s+FROM/i);
+    const invitations = read(join(process.cwd(), "drizzle/0010_staff_invitations.sql"));
+    expect(invitations).not.toMatch(/UPDATE\s+"?users/i);
+    expect(invitations).not.toMatch(/ALTER TABLE "users"/i);
+  });
+
+  it("la migración de tokens solo agrega tablas: no toca usuarios ni roles (el SUPER_ADMIN existente queda igual)", () => {
+    const sql = read(join(process.cwd(), "drizzle/0009_auth_tokens_and_throttle.sql"));
+    expect(sql).not.toMatch(/UPDATE\s+"?users/i);
+    expect(sql).not.toMatch(/DELETE\s+FROM/i);
+    expect(sql).not.toMatch(/ALTER TABLE "users"/i);
+    expect(sql).not.toMatch(/SUPER_ADMIN/);
+  });
+
+  it("registrarse sigue creando SIEMPRE una cuenta CUSTOMER y envía el correo de verificación", () => {
+    const action = code("server/actions/auth.ts");
+    expect(action).toMatch(/prepareVerificationEmail\(/);
+    expect(action).not.toMatch(/formData\.get\(["']role["']\)/);
   });
 });

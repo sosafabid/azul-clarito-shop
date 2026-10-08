@@ -107,9 +107,13 @@ async function main() {
   const db = createDatabase(url);
   const passwordHash = await hashPassword(password);
 
-  const [existing] = await db.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
+  const [existing] = await db.select({ id: users.id, role: users.role }).from(users).where(sql`lower(${users.email}) = ${email}`).limit(1);
 
   if (existing) {
+    // Nunca degradar a una SUPER_ADMIN existente (p. ej. sosafabid@gmail.com) por accidente.
+    if (existing.role === "SUPER_ADMIN" && role !== "SUPER_ADMIN") {
+      throw new Error("Esa cuenta es SUPER_ADMIN: este script no la degrada. Cambiá los roles desde el panel (Usuarios y roles).");
+    }
     await db.batch([
       db
         .update(users)

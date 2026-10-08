@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DeleteAccountForm, MarketingForm, PasswordForm, ProfileForm } from "@/components/account/AccountForms";
+import { ResendVerificationForm } from "@/components/account/RecoveryForms";
 import { Container } from "@/components/ui/Container";
 import { Notice } from "@/components/ui/Notice";
 import { routes } from "@/config/routes";
@@ -10,6 +11,7 @@ import { CONSENT_LABELS, type ConsentType } from "@/domain/consent";
 import { isStaffRole } from "@/domain/roles";
 import { changePasswordAction, deleteAccountAction, setMarketingAction, updateProfileAction } from "@/server/actions/account";
 import { customerLogoutAction } from "@/server/actions/auth";
+import { resendVerificationAction } from "@/server/actions/recovery";
 import { requireUser } from "@/server/auth";
 import { getAccountOverview } from "@/server/services/accounts";
 
@@ -41,6 +43,14 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         </div>
 
         {bienvenida && <Notice tone="success">¡Bienvenida/o a Azul Clarito! Tu cuenta ya está creada.</Notice>}
+        {!overview.emailVerifiedAt && (
+          <Notice tone="warning" className="space-y-3">
+            <p>
+              <strong>Tu correo todavía no está verificado.</strong> Te enviamos un enlace a {overview.email}; abrilo para activar tu cuenta del todo.
+            </p>
+            <ResendVerificationForm action={resendVerificationAction} email={overview.email} />
+          </Notice>
+        )}
         {staff && (
           <Notice>
             Tu cuenta es del equipo. Podés entrar al{" "}
@@ -56,7 +66,13 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           <div className="mt-5">
             <ProfileForm action={updateProfileAction} email={overview.email} initial={{ name: overview.name ?? "", phone: overview.phone ?? "" }} />
           </div>
-          <p className="mt-4 text-xs text-ink/60">Cuenta creada el {dateFormat.format(overview.createdAt)}. Todavía no verificamos los correos: lo haremos cuando activemos los emails de la tienda.</p>
+          <p className="mt-4 text-xs text-ink/60">
+            Cuenta creada el {dateFormat.format(overview.createdAt)}. Correo:{" "}
+            <strong className={overview.emailVerifiedAt ? "text-navy" : "text-coral"}>
+              {overview.emailVerifiedAt ? `verificado el ${dateFormat.format(overview.emailVerifiedAt)}` : "sin verificar"}
+            </strong>
+            .
+          </p>
         </div>
 
         <div className={card}>
@@ -97,10 +113,19 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
 
         <div className={card}>
           <h2 className="text-2xl font-bold">Seguridad</h2>
-          <p className="mt-2 text-sm text-ink/70">Al cambiar la contraseña cerramos tus otras sesiones abiertas.</p>
+          <h3 className="mt-4 text-lg font-bold">Contraseña</h3>
+          <p className="mt-1 text-sm font-semibold text-navy">¿Querés cambiar tu contraseña?</p>
+          <p className="mt-1 text-sm text-ink/70">Ingresá la actual y elegí una nueva. Al cambiarla cerramos tus otras sesiones abiertas.</p>
           <div className="mt-5">
             <PasswordForm action={changePasswordAction} />
           </div>
+          <p className="mt-5 text-sm text-ink/70">
+            ¿No recordás tu contraseña actual?{" "}
+            <Link href={routes.forgotPassword} className="font-semibold text-navy underline underline-offset-4">
+              Restablecela por correo
+            </Link>
+            .
+          </p>
         </div>
 
         <div className={`${card} border-coral/50`}>

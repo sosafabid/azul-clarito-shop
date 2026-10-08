@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { adminNav } from "@/config/navigation";
 import { routes } from "@/config/routes";
+import { can } from "@/domain/permissions";
+import type { UserRole } from "@/domain/roles";
 
 type AdminShellProps = {
   children: React.ReactNode;
-  role: string;
+  role: UserRole;
   email: string;
   logoutAction: () => Promise<void>;
 };
@@ -24,7 +26,7 @@ export function AdminShell({ children, role, email, logoutAction }: AdminShellPr
         </div>
         <nav aria-label="Administración" className="px-3 pb-3 md:pb-6">
           <ul className="flex gap-1 overflow-x-auto md:flex-col">
-            {adminNav.map((item) => (
+            {adminNav.filter((item) => !item.permission || can(role, item.permission)).map((item) => (
               <li key={item.href} className="shrink-0">
                 <Link
                   href={item.href}

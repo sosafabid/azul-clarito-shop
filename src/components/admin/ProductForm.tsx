@@ -46,6 +46,11 @@ type ProductFormProps = {
   hasVariants?: boolean;
   /** Hay almacenamiento externo configurado (permite subir archivos). */
   uploadsEnabled?: boolean;
+  /**
+   * Qué muestra el formulario según los permisos de quien lo usa (se calculan en el servidor).
+   * Es solo presentación: la Server Action vuelve a aplicar la restricción.
+   */
+  caps: { costs: boolean; stock: boolean; publish: boolean };
 };
 
 const inputClass =
@@ -69,7 +74,7 @@ function Field({ label, error, hint, children }: { label: string; error?: string
   );
 }
 
-export function ProductForm({ action, mode, initial, expectedAvailableStock, systemStock, categories, collections, hasVariants = false, uploadsEnabled = false }: ProductFormProps) {
+export function ProductForm({ action, mode, initial, expectedAvailableStock, systemStock, categories, collections, hasVariants = false, uploadsEnabled = false, caps }: ProductFormProps) {
   const [state, formAction, pending] = useActionState(action, null);
   const [values, setValues] = useState<ProductFormValues>(initial);
   const [slugTouched, setSlugTouched] = useState(mode === "edit");
@@ -141,7 +146,11 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
               className={inputClass}
             />
           </Field>
-          {mode === "create" ? (
+          {mode === "create" && !caps.publish ? (
+            <p className="self-end rounded-xl bg-celeste/35 px-4 py-3 text-sm text-ink/80">
+              El producto nuevo queda <strong>Oculto</strong> hasta que una persona SUPER_ADMIN lo publique.
+            </p>
+          ) : mode === "create" ? (
             <Field label="Estado inicial" error={errors.status} hint="Un producto Oculto existe en el panel pero no aparece en la tienda.">
               <select name="status" value={values.status} onChange={(e) => set("status", e.target.value)} className={inputClass}>
                 <option value="DRAFT">Oculto (no se muestra en la tienda)</option>
@@ -206,11 +215,13 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
 
       <section className="space-y-5 rounded-3xl border border-celeste bg-paper p-5 sm:p-7">
         <div>
-          <h2 className="text-xl font-bold">Precio y costo</h2>
-          <p className="mt-1 text-sm text-ink/70">
-            El costo es <strong>privado</strong>: solo lo ve el equipo, nunca el público. La utilidad bruta no incluye gastos
-            operativos, empaque, comisiones ni publicidad.
-          </p>
+          <h2 className="text-xl font-bold">{caps.costs ? "Precio y costo" : "Precio"}</h2>
+          {caps.costs && (
+            <p className="mt-1 text-sm text-ink/70">
+              El costo es <strong>privado</strong>: solo lo ve quien tiene permiso, nunca el público. La utilidad bruta no incluye gastos
+              operativos, empaque, comisiones ni publicidad.
+            </p>
+          )}
         </div>
         <div className="grid gap-5 sm:grid-cols-3">
           <Field label="Moneda" error={errors.currency}>
@@ -229,11 +240,14 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
           >
             <input name="price" inputMode="decimal" value={values.price} onChange={(e) => set("price", e.target.value)} className={inputClass} required />
           </Field>
-          <Field label="Costo (opcional)" error={errors.cost} hint="Vacío = costo desconocido">
-            <input name="cost" inputMode="decimal" value={values.cost} onChange={(e) => set("cost", e.target.value)} className={inputClass} />
-          </Field>
+          {caps.costs && (
+            <Field label="Costo (opcional)" error={errors.cost} hint="Vacío = costo desconocido">
+              <input name="cost" inputMode="decimal" value={values.cost} onChange={(e) => set("cost", e.target.value)} className={inputClass} />
+            </Field>
+          )}
         </div>
 
+        {caps.costs && (
         <div aria-live="polite" className="rounded-2xl bg-celeste/35 p-4">
           {economics === null ? (
             <p className="text-sm text-ink/70">Ingresá el precio para ver la utilidad y el margen.</p>
@@ -262,8 +276,9 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
             </dl>
           )}
         </div>
+        )}
 
-        {economics?.isLoss && (
+        {caps.costs && economics?.isLoss && (
           <Notice tone="warning">
             <p className="font-bold">⚠️ Margen negativo: el precio es menor que el costo.</p>
             <p className="mt-1">Cada venta se haría con pérdida. Si es intencional, confirmalo para poder guardar.</p>
@@ -309,8 +324,19 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
           </Notice>
         ) : (
           <div className="grid gap-5 sm:grid-cols-3">
-            <Field label={mode === "create" ? "Stock inicial" : "Stock disponible"} error={errors.availableStock} hint="Unidades que se pueden vender ahora.">
-              <input name="availableStock" inputMode="numeric" value={values.availableStock} onChange={(e) => set("availableStock", e.target.value)} className={inputClass} />
+            <Field
+              label={mode === "create" ? "Stock inicial" : "Stock disponible"}
+              error={errors.availableStock}
+              hint={caps.stock ? "Unidades que se pueden vender ahora." : "Solo una persona SUPER_ADMIN registra el stock y sus ajustes."}
+            >
+              <input
+                name={caps.stock ? "availableStock" : undefined}
+                inputMode="numeric"
+                value={values.availableStock}
+                onChange={(e) => set("availableStock", e.target.value)}
+                readOnly={!caps.stock}
+                className={`${inputClass} ${caps.stock ? "" : "bg-celeste/20"}`}
+              />
             </Field>
             <Field label="Avisar con poco stock desde" error={errors.lowStockThreshold} hint="Cantidad que activa la alerta de stock bajo.">
               <input name="lowStockThreshold" inputMode="numeric" value={values.lowStockThreshold} onChange={(e) => set("lowStockThreshold", e.target.value)} className={inputClass} />

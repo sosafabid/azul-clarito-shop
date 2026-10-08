@@ -9,6 +9,8 @@ import { getDb, isDatabaseConfigured } from "@/db";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { formatPercent, unitEconomics } from "@/domain/product-economics";
 import { PRODUCT_FILTERS, PRODUCT_FILTER_LABELS, parseProductFilter, parseSearch } from "@/domain/product-lifecycle";
+import { catalogCapabilities } from "@/domain/capabilities";
+import { redactCosts } from "@/domain/redaction";
 import { requirePermission } from "@/server/auth";
 import { LIST_LIMIT, listAdminProducts } from "@/server/services/catalog/admin";
 import { cn } from "@/lib/utils";
@@ -23,14 +25,17 @@ const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*~]/g,
 
 export default async function AdminProductsPage({ searchParams }: { searchParams: Promise<{ estado?: string; q?: string; saved?: string }> }) {
   // Autorización en el servidor, además del guard del layout (defensa en profundidad).
-  await requirePermission("products:read");
-  await requirePermission("costs:read");
+  const session = await requirePermission("products:read");
+  // Quién ve costos / puede publicar sale de la matriz de permisos. Sin `costs:read` los datos
+  // económicos se QUITAN en el servidor antes de armar la página: no viajan ni se ocultan con CSS.
+  const caps = catalogCapabilities(session.role);
   const params = await searchParams;
   const filter = parseProductFilter(params.estado);
   const search = parseSearch(params.q);
   const notice = params.saved ? PRODUCT_NOTICES[params.saved] : undefined;
 
-  const list = isDatabaseConfigured() ? await listAdminProducts(getDb(), { filter, search }) : null;
+  const fetched = isDatabaseConfigured() ? await listAdminProducts(getDb(), { filter, search }) : null;
+  const list = fetched && { ...fetched, items: redactCosts(fetched.items, caps.costs) };
 
   const href = (estado: string, q = search) => `${routes.adminProducts}?estado=${estado}${q ? `&q=${encode(q)}` : ""}`;
   const returnTo = href(filter);
@@ -52,7 +57,7 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Productos</h1>
-          <p className="mt-1 text-sm text-ink/70">Utilidad bruta = precio − costo. No incluye gastos operativos, empaque, comisiones ni publicidad.</p>
+          {caps.costs && <p className="mt-1 text-sm text-ink/70">Utilidad bruta = precio − costo. No incluye gastos operativos, empaque, comisiones ni publicidad.</p>}
         </div>
         <Link href={routes.adminProductNew} className="inline-flex min-h-11 items-center rounded-full bg-navy px-6 py-2.5 font-display text-sm font-bold text-paper hover:bg-ink">
           Nuevo producto
@@ -103,12 +108,15 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
           </div>
 
           <dl className="grid gap-4 sm:grid-cols-4">
-            {[
-              ["Productos (en esta vista)", String(list.matching)],
-              ["Valor del inventario (al costo)", formatMoney(totals.cost, "CRC")],
-              ["Venta potencial", formatMoney(totals.sales, "CRC")],
-              ["Utilidad potencial", formatMoney(totals.profit, "CRC")],
-            ].map(([label, value]) => (
+            {(caps.costs
+              ? [
+                  ["Productos (en esta vista)", String(list.matching)],
+                  ["Valor del inventario (al costo)", formatMoney(totals.cost, "CRC")],
+                  ["Venta potencial", formatMoney(totals.sales, "CRC")],
+                  ["Utilidad potencial", formatMoney(totals.profit, "CRC")],
+                ]
+              : [["Productos (en esta vista)", String(list.matching)]]
+            ).map(([label, value]) => (
               <div key={label} className="rounded-2xl border border-celeste bg-paper p-4">
                 <dt className="text-xs font-bold uppercase tracking-wider text-ink/60">{label}</dt>
                 <dd className="mt-1 font-display text-2xl font-bold text-navy">{value}</dd>
@@ -126,18 +134,26 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
             </Notice>
           ) : (
             <div className="overflow-x-auto rounded-3xl border border-celeste bg-paper">
-              <table className="w-full min-w-[72rem] text-sm">
+              <table className={caps.costs ? "w-full min-w-[72rem] text-sm" : "w-full min-w-[40rem] text-sm"}>
                 <thead className="border-b border-celeste bg-celeste/30">
                   <tr>
                     <th className={th}>Producto</th>
                     <th className={th}>Precio</th>
-                    <th className={th}>Costo</th>
-                    <th className={th}>Utilidad / u</th>
-                    <th className={th}>Margen</th>
+                    {caps.costs && (
+                      <>
+                        <th className={th}>Costo</th>
+                        <th className={th}>Utilidad / u</th>
+                        <th className={th}>Margen</th>
+                      </>
+                    )}
                     <th className={th}>Disp. · Res. · Vend.</th>
-                    <th className={th}>Valor inv.</th>
-                    <th className={th}>Venta pot.</th>
-                    <th className={th}>Utilidad pot.</th>
+                    {caps.costs && (
+                      <>
+                        <th className={th}>Valor inv.</th>
+                        <th className={th}>Venta pot.</th>
+                        <th className={th}>Utilidad pot.</th>
+                      </>
+                    )}
                     <th className={th}>Acciones</th>
                   </tr>
                 </thead>
@@ -160,24 +176,32 @@ export default async function AdminProductsPage({ searchParams }: { searchParams
                           </div>
                         </td>
                         <td className={td}>{formatMoney(row.price, currency)}</td>
-                        <td className={td}>{money(row.cost)}</td>
-                        <td className={td}>{money(unit.grossProfitPerUnit)}</td>
-                        <td className={td}>
-                          {unit.isLoss ? (
-                            <span className="rounded-full bg-coral/20 px-2 py-0.5 font-bold text-navy">{formatPercent(unit.marginPercent)} ⚠ pérdida</span>
-                          ) : (
-                            formatPercent(unit.marginPercent)
-                          )}
-                        </td>
+                        {caps.costs && (
+                          <>
+                            <td className={td}>{money(row.cost)}</td>
+                            <td className={td}>{money(unit.grossProfitPerUnit)}</td>
+                            <td className={td}>
+                              {unit.isLoss ? (
+                                <span className="rounded-full bg-coral/20 px-2 py-0.5 font-bold text-navy">{formatPercent(unit.marginPercent)} ⚠ pérdida</span>
+                              ) : (
+                                formatPercent(unit.marginPercent)
+                              )}
+                            </td>
+                          </>
+                        )}
                         <td className={td}>
                           {row.stock.available} · {row.stock.reserved} · {row.stock.sold}
                         </td>
-                        <td className={td}>{money(row.stock.valueAtCost)}</td>
-                        <td className={td}>{money(row.stock.potentialSales)}</td>
-                        <td className={td}>{money(row.stock.potentialProfit)}</td>
+                        {caps.costs && (
+                          <>
+                            <td className={td}>{money(row.stock.valueAtCost)}</td>
+                            <td className={td}>{money(row.stock.potentialSales)}</td>
+                            <td className={td}>{money(row.stock.potentialProfit)}</td>
+                          </>
+                        )}
                         <td className={td}>
                           <div className="flex flex-col gap-2">
-                            <ProductActionButtons id={row.id} status={row.status} returnTo={returnTo} compact />
+                            {caps.publish && <ProductActionButtons id={row.id} status={row.status} returnTo={returnTo} compact />}
                             <Link href={routes.adminProduct(row.id)} className="font-display text-xs font-bold text-navy underline underline-offset-4">
                               Editar
                             </Link>

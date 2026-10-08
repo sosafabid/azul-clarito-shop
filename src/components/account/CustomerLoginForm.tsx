@@ -19,6 +19,11 @@ export function CustomerLoginForm({ action }: { action: (previous: LoginState, f
       <Field label="Contraseña">
         <input name="password" type="password" autoComplete="current-password" required className={inputClass} />
       </Field>
+      <p className="-mt-2 text-sm">
+        <Link href={routes.forgotPassword} className="font-semibold text-navy underline underline-offset-4">
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </p>
       <SubmitButton pending={pending} pendingLabel="Ingresando…">
         Ingresar
       </SubmitButton>

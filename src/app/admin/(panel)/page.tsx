@@ -2,9 +2,13 @@ import Link from "next/link";
 import { ComingSoon } from "@/components/ui/ComingSoon";
 import { adminNav } from "@/config/navigation";
 import { routes } from "@/config/routes";
+import { can } from "@/domain/permissions";
+import { requireStaff } from "@/server/auth";
 
-export default function AdminHomePage() {
-  const sections = adminNav.filter((item) => item.href !== routes.admin);
+export default async function AdminHomePage() {
+  const session = await requireStaff();
+  // Solo se listan las secciones a las que esta persona tiene acceso (cada página igual lo exige en el servidor).
+  const sections = adminNav.filter((item) => item.href !== routes.admin && (!item.permission || can(session.role, item.permission)));
 
   return (
     <div className="space-y-8">

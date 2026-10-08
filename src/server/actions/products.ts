@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { catalogCapabilities } from "@/domain/capabilities";
+import { BELOW_COST_MESSAGE_FOR_STAFF, constrainProductInput, priceBelowStoredCost } from "@/domain/catalog-limits";
 import { MAX_IMAGES_PER_PRODUCT } from "@/domain/images";
 import { parseProductForm } from "@/domain/product-form";
 import { deleteConfirmationMatches, isProductAction } from "@/domain/product-lifecycle";
@@ -12,6 +14,7 @@ import { resolveAuditActor } from "@/server/services/audit";
 import {
   applyProductAction,
   createProduct,
+  getAdminProduct,
   deleteProduct,
   updateProduct,
   type ImageRef,
@@ -43,9 +46,11 @@ export async function createProductAction(_previous: ProductFormState, formData:
 
   const parsed = parseProductForm(formToRecord(formData), "create");
   if (!parsed.ok) return { errors: parsed.errors };
+  // Quien no tiene permiso de costos / stock / publicación NO puede fijarlos, aunque fabrique la petición.
+  const data = constrainProductInput(parsed.data, catalogCapabilities(session.role));
 
   const files = collectFiles(formData, "imageFiles");
-  if (parsed.data.imageUrls.length + files.length > MAX_IMAGES_PER_PRODUCT) {
+  if (data.imageUrls.length + files.length > MAX_IMAGES_PER_PRODUCT) {
     return { errors: { imageUrls: `Máximo ${MAX_IMAGES_PER_PRODUCT} imágenes por producto.` } };
   }
 
@@ -53,8 +58,8 @@ export async function createProductAction(_previous: ProductFormState, formData:
   const uploaded = await storeProductImages(productId, files);
   if (!uploaded.ok) return { errors: { imageFiles: uploaded.message } };
 
-  const images: ImageRef[] = [...uploaded.images, ...parsed.data.imageUrls.map((url) => ({ url }))];
-  const result = await createProduct(getDb(), parsed.data, resolveAuditActor(session), images, productId);
+  const images: ImageRef[] = [...uploaded.images, ...data.imageUrls.map((url) => ({ url }))];
+  const result = await createProduct(getDb(), data, resolveAuditActor(session), images, productId);
   if (!result.ok) {
     await deleteStoredImages(uploaded.images.map((image) => image.url)); // no dejar archivos huérfanos
     return failure(result);
@@ -71,10 +76,22 @@ export async function updateProductAction(id: string, _previous: ProductFormStat
   const parsed = parseProductForm(record, "update");
   if (!parsed.ok) return { errors: parsed.errors };
 
-  const expectedRaw = record.expectedAvailableStock;
-  const expected = expectedRaw !== undefined && /^\d+$/.test(expectedRaw) ? Number(expectedRaw) : undefined;
+  const caps = catalogCapabilities(session.role);
+  const current = await getAdminProduct(getDb(), id);
+  if (!current) return { errors: {}, message: "Producto no encontrado." };
+  const stored = { cost: current.cost, availableStock: current.availableStock ?? 0 };
 
-  const result = await updateProduct(getDb(), id, parsed.data, resolveAuditActor(session), expected);
+  // Sin permiso de costos / stock se conserva lo guardado (lo que llegue en el formulario se descarta).
+  const data = constrainProductInput(parsed.data, caps, stored);
+  if (!caps.costs && data.price !== current.price && priceBelowStoredCost(data.price, stored.cost)) {
+    return { errors: { price: BELOW_COST_MESSAGE_FOR_STAFF } };
+  }
+
+  const expectedRaw = record.expectedAvailableStock;
+  const expectedFromForm = expectedRaw !== undefined && /^\d+$/.test(expectedRaw) ? Number(expectedRaw) : undefined;
+  const expected = caps.stock ? expectedFromForm : stored.availableStock;
+
+  const result = await updateProduct(getDb(), id, data, resolveAuditActor(session), expected);
   if (!result.ok) return failure(result);
 
   redirect(`${routes.adminProduct(id)}?saved=updated`);
@@ -87,7 +104,8 @@ const ACTION_NOTICE = { publish: "published", hide: "hidden", archive: "archived
  * (en el listado y en la ficha). `returnTo` es una ruta del panel de productos.
  */
 export async function productLifecycleAction(id: string, action: string, returnTo: string): Promise<void> {
-  const session = await requirePermission("products:write");
+  // Publicar, ocultar, archivar y restaurar cambian lo que ve el público: solo quien tiene `products:publish`.
+  const session = await requirePermission("products:publish");
   const back = safeProductsReturn(returnTo, routes.adminProducts);
   if (!isDatabaseConfigured() || !isProductAction(action)) redirect(back);
 

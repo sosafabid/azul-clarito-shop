@@ -11,7 +11,8 @@ import { ProductStatusBadge } from "@/components/admin/ProductStatusBadge";
 import { VariantsManager } from "@/components/admin/VariantsManager";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
-import { can } from "@/domain/permissions";
+import { catalogCapabilities } from "@/domain/capabilities";
+import { redactCosts, stripCosts } from "@/domain/redaction";
 import { updateProductAction } from "@/server/actions/products";
 import { requirePermission } from "@/server/auth";
 import { getAdminProduct, getStockSummaries } from "@/server/services/catalog/admin";
@@ -33,13 +34,15 @@ function plainMoney(amount: number | null, currency: string): string {
 
 export default async function EditProductPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ saved?: string }> }) {
   const session = await requirePermission("products:write");
-  await requirePermission("costs:read");
+  // Sin `costs:read`, el costo y toda la economía se quitan EN EL SERVIDOR (no llegan al navegador).
+  const caps = catalogCapabilities(session.role);
   const [{ id }, { saved }] = await Promise.all([params, searchParams]);
 
   if (!isDatabaseConfigured()) return <DatabaseNotice />;
   const db = getDb();
-  const product = await getAdminProduct(db, id);
-  if (!product) notFound();
+  const loaded = await getAdminProduct(db, id);
+  if (!loaded) notFound();
+  const product = caps.costs ? loaded : stripCosts(loaded);
 
   const [categories, collections, images, variants, summaries] = await Promise.all([
     listCategoryOptions(db),
@@ -48,8 +51,9 @@ export default async function EditProductPage({ params, searchParams }: { params
     listProductVariants(db, id),
     getStockSummaries(db, [id]),
   ]);
+  const visibleVariants = redactCosts(variants, caps.costs);
   const stock = summaries.get(id) ?? { available: 0, reserved: 0, sold: 0, valueAtCost: null, potentialSales: 0, potentialProfit: null, rowsWithoutCost: 0 };
-  const canDelete = can(session.role, "products:delete");
+  const canDelete = caps.delete;
   const notice = saved ? PRODUCT_NOTICES[saved] : undefined;
   const hasVariants = variants.length > 0;
 
@@ -98,14 +102,14 @@ export default async function EditProductPage({ params, searchParams }: { params
               Ver en la tienda
             </Link>
           )}
-          <ProductActionButtons id={product.id} status={product.status} returnTo={routes.adminProduct(product.id)} />
+          {caps.publish && <ProductActionButtons id={product.id} status={product.status} returnTo={routes.adminProduct(product.id)} />}
         </div>
       </div>
 
       {notice && <Notice tone={notice.tone}>{notice.text}</Notice>}
       {product.status === "ARCHIVED" && <Notice tone="warning">Este producto está archivado: no aparece en el catálogo activo. Restauralo para volver a usarlo.</Notice>}
 
-      <EconomicsPanel price={product.price} cost={product.cost} currency={product.currency} stock={stock} />
+      {caps.costs && <EconomicsPanel price={product.price} cost={product.cost} currency={product.currency} stock={stock} />}
 
       <ProductForm
         action={updateProductAction.bind(null, product.id)}
@@ -116,10 +120,11 @@ export default async function EditProductPage({ params, searchParams }: { params
         categories={categories}
         collections={collections}
         hasVariants={hasVariants}
+        caps={{ costs: caps.costs, stock: caps.stock, publish: caps.publish }}
       />
 
       <ImagesManager productId={product.id} productName={product.name} images={images} uploadsEnabled={isBlobConfigured()} />
-      <VariantsManager productId={product.id} currency={product.currency} basePrice={product.price} variants={variants} canDelete={canDelete} />
+      <VariantsManager productId={product.id} currency={product.currency} basePrice={product.price} variants={visibleVariants} canDelete={canDelete} caps={{ costs: caps.costs, stock: caps.stock }} />
 
       <section className="space-y-3 rounded-3xl border-2 border-coral/50 bg-paper p-5 sm:p-7">
         <h2 className="text-xl font-bold">Zona de peligro</h2>

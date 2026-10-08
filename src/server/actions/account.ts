@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { routes } from "@/config/routes";
 import { legalConfig } from "@/config/legal";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { parsePasswordChange, parseProfileForm } from "@/domain/customer-form";
 import { endSession, getCurrentTokenHash, requireUser } from "@/server/auth";
+import { getEmailService } from "@/server/services/email/service";
 import { changePassword, deleteAccount, getAccountOverview, setMarketingConsent, updateProfile } from "@/server/services/accounts";
 
 /**
@@ -60,6 +62,10 @@ export async function changePasswordAction(_previous: AccountFormState, formData
     if (result.code === "locked") return { errors: {}, message: "La cuenta está bloqueada temporalmente por intentos fallidos. Probá de nuevo en unos minutos." };
     return { errors: { currentPassword: "La contraseña actual no es correcta." } };
   }
+  // Aviso de seguridad por correo (sin contraseñas), después de responder.
+  after(async () => {
+    await getEmailService().send({ event: "password_changed", to: session.email, data: { name: session.name } });
+  });
   return { errors: {}, ok: true, message: "Contraseña actualizada. Cerramos tus otras sesiones abiertas." };
 }
 

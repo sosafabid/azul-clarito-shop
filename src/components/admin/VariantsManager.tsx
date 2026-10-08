@@ -16,12 +16,14 @@ export function VariantsManager({
   basePrice,
   variants,
   canDelete,
+  caps,
 }: {
   productId: string;
   currency: string;
   basePrice: number;
   variants: AdminVariant[];
   canDelete: boolean;
+  caps: { costs: boolean; stock: boolean };
 }) {
   const code = toCurrency(currency);
   return (
@@ -71,6 +73,7 @@ export function VariantsManager({
                     expectedAvailableStock={variant.availableStock}
                     submitLabel="Guardar variante"
                     currencyHint={currency}
+                    caps={caps}
                     initial={{
                       name: variant.name ?? "",
                       sku: variant.sku,
@@ -95,6 +98,7 @@ export function VariantsManager({
             action={addVariantAction.bind(null, productId)}
             submitLabel="Agregar variante"
             currencyHint={currency}
+            caps={caps}
             initial={{ name: "", sku: "", options: "", price: "", cost: "", availableStock: "0", isActive: true }}
           />
         </div>

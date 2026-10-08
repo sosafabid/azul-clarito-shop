@@ -45,11 +45,13 @@ defecto **la tienda ya funciona en tu computadora** (no pide base de datos todav
 |---|---|---|
 | `DATABASE_URL` | Conexión a Neon (con pooling) | Al usar la base de datos |
 | `DATABASE_URL_UNPOOLED` | Conexión directa de Neon, para migraciones | Opcional (recomendada) |
-| `AUTH_SECRET` | Reservada para cuentas de clientas | Todavía no se usa (el login del panel no la necesita) |
+| `AUTH_SECRET` | Opcional: refuerza el HMAC de los contadores anti-abuso (`auth_throttle`) | Recomendada en producción (cualquier texto largo aleatorio) |
 | `BLOB_READ_WRITE_TOKEN` | Almacenamiento de imágenes (Vercel Blob) | Para SUBIR archivos desde el panel (por URL no hace falta) |
-| `RESEND_API_KEY`, `EMAIL_FROM`, `ADMIN_NOTIFY_EMAIL` | Emails | Cuando se conecte Resend |
+| `RESEND_API_KEY` | Clave de Resend. **Solo servidor** | Para enviar correos (verificación y restablecimiento) |
+| `RESEND_FROM_EMAIL` | Remitente, p. ej. `Azul Clarito <cuenta@TU-DOMINIO-VERIFICADO>`. El dominio **debe estar verificado en Resend** | Para enviar correos (`EMAIL_FROM` se sigue aceptando como alternativa) |
+| `ADMIN_NOTIFY_EMAIL` | Aviso de pedidos nuevos a management | Cuando haya pedidos |
 | `PAYMENT_PROVIDER`, `PAYMENT_PROVIDER_SECRET` | Pagos | Cuando se elija proveedor |
-| `NEXT_PUBLIC_SITE_URL` | URL pública de la tienda | En Vercel: `https://shop.azulclaritocr.com` |
+| `NEXT_PUBLIC_SITE_URL` (o `NEXT_PUBLIC_APP_URL`, que tiene prioridad) | URL pública de la tienda; con ella se arman los enlaces de los correos | En Vercel: `https://shop.azulclaritocr.com`. En producción **solo** se aceptan dominios `https` públicos: `localhost`, IPs y `*.vercel.app` se ignoran y se usa `https://shop.azulclaritocr.com` |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Correo público de contacto | Opcional |
 
 > ⚠️ **`.env.local` nunca se sube a GitHub** (está en `.gitignore`). No pegues
@@ -360,8 +362,71 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
 - **La auditoría de la cuenta no guarda datos personales:** solo qué campos cambiaron, nunca sus valores.
 - **Contraseña:** hash scrypt con sal; al cambiarla se cierran las demás sesiones. El login (equipo y clientas) comparte la misma protección:
   mensaje genérico, tiempo equilibrado y bloqueo de 15 minutos tras 5 intentos fallidos.
-- **Límites conocidos:** (1) el registro avisa si un correo ya existe (sin verificación por email no se puede evitar enumerar cuentas); (2) hay un
-  freno global de 20 registros cada 10 minutos y un campo trampa contra bots, pero **no hay límite por IP**; (3) el correo no se verifica todavía.
+- **Límites conocidos:** (1) el **registro** avisa si un correo ya existe (es un compromiso de usabilidad; "olvidé mi contraseña" y el reenvío de
+  verificación sí responden siempre igual); (2) el registro tiene un freno global de 20 cuentas cada 10 minutos y un campo trampa contra bots (los
+  flujos de recuperación sí limitan por correo y por IP, ver abajo); (3) iniciar sesión **no** exige tener el correo verificado (decisión pendiente).
+
+## Verificación de correo y restablecimiento de contraseña (Resend)
+
+**No hay un segundo sistema de autenticación.** Se reutiliza el de la tienda (correo + contraseña con hash scrypt, sesiones en PostgreSQL, roles
+`CUSTOMER` / `STAFF` / `SUPER_ADMIN`) y se le agregaron enlaces de un solo uso. En el proyecto no existe Better Auth ni Neon Auth.
+
+| Ruta | Para qué |
+|---|---|
+| `/verify-email` | Sin enlace: "Revisá tu correo para verificar tu cuenta." (+ reenviar). Con `?token=`: botón "Verificar mi correo" |
+| `/verification-success` | "Tu correo fue verificado correctamente." |
+| `/forgot-password` | Pide el correo y responde siempre lo mismo |
+| `/reset-password?token=` | Contraseña nueva + confirmación |
+| `/reset-success` | "Tu contraseña fue actualizada correctamente." + "Volver a iniciar sesión" |
+
+- **Tokens** (`auth_tokens`, migración `0009`): 256 bits aleatorios; en la base solo está el **hash sha256**. Verificación: vence en **24 h**.
+  Restablecimiento: vence en **60 min**. Se consumen con **una sola sentencia atómica** (`UPDATE … WHERE used_at IS NULL AND expires_at > now()`),
+  así que un enlace no se puede usar dos veces ni siquiera con dos peticiones simultáneas (hay prueba). Pedir uno nuevo anula los anteriores.
+  Nunca se guardan en localStorage ni en cookies; viajan una vez por la URL del correo.
+- **El enlace del correo no gasta el token**: abre una página con un botón y la verificación la **procesa el servidor** (Server Action) al
+  presionarlo. Así los antivirus y las vistas previas de los programas de correo no "queman" el enlace. `/reset-password` y `/verify-email` se
+  sirven con `Referrer-Policy: no-referrer` y `Cache-Control: no-store`.
+- **Restablecer**: guarda la contraseña nueva, **cierra todas las sesiones**, quita bloqueos por intentos fallidos, anula otros enlaces pendientes y
+  envía un aviso "Tu contraseña fue actualizada". Todo en una sola sentencia atómica.
+- **Cambiar** (en `/account` → Seguridad, pide la contraseña actual) es distinto de **restablecer** (por correo, sin sesión). Ambos avisan por correo.
+- **Anti-enumeración**: "olvidé mi contraseña" y el reenvío de verificación responden siempre el mismo texto exista o no la cuenta; el correo se envía
+  **después** de responder (`after()`), así el tiempo de respuesta no delata nada.
+- **Límites de frecuencia** (tabla `auth_throttle`, claves guardadas como HMAC; funcionan igual en Vercel): olvidé contraseña 3/hora por correo y
+  10/hora por IP; reenvío de verificación 3/hora por correo, 10/hora por IP y 1 cada 60 s; uso de enlaces 30 cada 15 min por IP. Al superarlo la
+  respuesta visible no cambia (sigue la genérica). La IP se lee de `x-forwarded-for` (Vercel la define; fuera de Vercel dependería de tu proxy).
+- **Resend** (`src/server/services/email/`): llamada HTTPS directa a `api.resend.com` **solo desde el servidor** (sin paquete nuevo). Si faltan
+  `RESEND_API_KEY` o `RESEND_FROM_EMAIL` **no se envía nada** (falla cerrado, no se inventa un remitente) y queda un aviso en el log. Un fallo de
+  Resend nunca rompe el registro: la persona puede pedir un reenvío. Los logs no incluyen la clave, los enlaces ni los correos.
+- **Correos**: HTML con tablas y estilos en línea (sin JavaScript, sin fuentes externas), colores de marca, logo (`/brand/logo-icon.png`) con texto
+  alternativo, versión de texto plano y el enlace visible por si el botón no funciona. Plantillas en `src/server/services/email/templates.ts`.
+- **Panel**: `/admin/customers` muestra cada cuenta como **Verificado / No verificado**. Solo SUPER_ADMIN ve además la sección "Equipo". Nunca se
+  leen contraseñas, hashes ni tokens (hay prueba de arquitectura).
+- **Pasos manuales** en Resend y Vercel: ver el final de esta sección en `.env.example` y el informe de entrega.
+  (1) Resend → *Domains* → agregar y **verificar** el dominio del remitente (registros DNS SPF y DKIM); (2) *API Keys* → crear una clave con permiso de
+  envío; (3) Vercel → *Settings → Environment Variables* → `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `NEXT_PUBLIC_SITE_URL=https://shop.azulclaritocr.com`
+  (y `AUTH_SECRET`) en *Production*; (4) aplicar la migración `0009` en Neon (`npm run db:migrate`) **antes** de desplegar.
+
+## Usuarios, roles y permisos
+
+Tres roles (el sistema de autenticación es el mismo de siempre: no hay otro):
+
+| Rol | Qué es |
+|---|---|
+| `SUPER_ADMIN` | Control completo: usuarios y roles, publicación, inventario, costos, impuestos, envíos, integraciones, auditoría. |
+| `STAFF` | Operación diaria: ve y edita productos e imágenes (sin costo, stock ni publicación), consulta inventario y pedidos, prepara pedidos y registra courier/tracking/fecha de envío. |
+| `CUSTOMER` | Clienta de la tienda. Sin acceso al panel. Es el rol de todo registro nuevo. |
+
+**Una sola fuente de verdad:** `src/domain/permissions.ts` (`PERMISSIONS`). Ninguna otra parte compara roles. Para ampliar a STAFF basta con agregar `"STAFF"` a la línea del permiso; para un rol especializado futuro, agregarlo al tipo `UserRole` y a las líneas que correspondan. Las páginas usan `can()` solo para decidir qué mostrar; la autorización real la hacen `requirePermission(...)` en cada página y Server Action, y la prueba `architecture.test.ts` falla si una acción no lo llama antes de tocar la base de datos.
+
+**Lo que STAFF nunca recibe:** costos, márgenes, utilidades ni valor de inventario (se quitan en el servidor antes de enviar datos al navegador, `domain/redaction.ts`); impuestos, envíos, integraciones, auditoría, el directorio de clientas ni "Usuarios y roles". Aunque alguien fabrique la petición con campos de costo, stock o estado, el servidor los descarta (`domain/catalog-limits.ts`).
+
+**Usuarios y roles (`/admin/users`, solo SUPER_ADMIN):** tabla con búsqueda, filtros por rol/estado/verificación y paginación; ficha de cada cuenta con historial. Desde la ficha se asigna STAFF a una cuenta existente, se retira (vuelve a CUSTOMER, con confirmación) y se suspende o reactiva el acceso. Reglas: nadie cambia su propio rol, SUPER_ADMIN no se asigna ni se modifica desde el panel, y la última SUPER_ADMIN activa no puede perder su rol ni su acceso (se valida en la aplicación **y** con un trigger de la base, migración `0011`).
+
+**Invitar a STAFF por correo:** SUPER_ADMIN escribe un correo **sin cuenta**; la persona recibe un enlace personal (72 h, un solo uso, se puede revocar) y al aceptarlo crea su contraseña. El rol STAFF lo fija el servidor solo al consumir una invitación válida; el correo queda verificado porque recibió el enlace. Si el correo ya tiene cuenta, se asigna el rol desde su ficha (nunca hay dos usuarios con el mismo correo). **Resend:** no requiere ningún cambio nuevo; usa el mismo remitente verificado y las mismas variables. Solo se agrega la plantilla `staff_invitation`.
+
+**Auditoría** (`audit_logs`): `staff_invited`, `staff_invitation_accepted`, `staff_invitation_revoked`, `user_role_changed`, `staff_access_suspended`, `staff_access_reactivated`, `user_administrative_access_removed`, con quién actuó, la cuenta afectada, rol anterior y nuevo, resultado (`success`/`denied`) y fecha. Nunca contraseñas, tokens ni secretos. Al eliminar una cuenta se borra el correo de sus registros.
+
+**`scripts/create-admin.ts`** no degrada a una SUPER_ADMIN existente. Migraciones nuevas: `0010_staff_invitations` (tabla) y `0011_protect_last_super_admin` (trigger); ninguna modifica ni borra datos de `users`.
 
 ## Seguridad de dependencias
 
@@ -375,7 +440,8 @@ cuando los autores publiquen sus actualizaciones.
 
 ## Qué NO está implementado todavía
 
-- **Recuperar contraseña olvidada** y **verificar el correo**: ambos necesitan enviar emails y todavía no hay servicio de correo (`RESEND_API_KEY`). Hasta entonces, una clienta que olvide su contraseña no puede recuperarla sola.
+- Exigir correo verificado para comprar (hoy se puede ingresar y comprar sin verificar; decisión pendiente)
+- Cambio de correo de la cuenta (hoy el correo no se puede cambiar)
 - Descargar una copia de los datos personales (derecho de acceso en archivo)
 - Revisión legal de `/terminos` y `/privacidad` (ver abajo)
 - Gestión de usuarios del equipo desde el panel (hoy se crean con `npm run admin:create`)
@@ -384,7 +450,7 @@ cuando los autores publiquen sus actualizaciones.
 - Limpieza automática de carritos de invitada abandonados (`carts.updated_at` ya queda guardado)
 - Eventos de analytics del carrito (add_to_cart, view_cart…)
 - Pagos (proveedor compatible con Costa Rica por elegir)
-- Emails (Resend) y plantillas
+- Emails de pedidos (confirmación, envío…): los eventos existen en `email/events.ts` pero aún no tienen plantilla
 - Cálculo de envíos (la primera versión será manual)
 - Imágenes/productos reales (los bloques de la home son placeholders)
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { redirect } from "next/navigation";
+import { Notice } from "@/components/ui/Notice";
 import { LoginForm } from "@/components/admin/LoginForm";
 import { routes } from "@/config/routes";
 import { isStaffRole } from "@/domain/roles";
@@ -9,7 +10,8 @@ import { getSession } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Ingresar" };
 
-export default async function AdminLoginPage() {
+export default async function AdminLoginPage({ searchParams }: { searchParams: Promise<{ invitacion?: string | string[] }> }) {
+  const { invitacion } = await searchParams;
   const session = await getSession();
   if (session && isStaffRole(session.role)) redirect(routes.admin);
 
@@ -19,6 +21,7 @@ export default async function AdminLoginPage() {
         <Image src="/brand/logo-horizontal.jpg" alt="Azul Clarito" width={520} height={250} priority className="mx-auto h-16 w-auto" />
         <h1 className="mt-6 text-center text-2xl font-bold">Administración</h1>
         <p className="mt-1 text-center text-sm text-ink/70">Acceso solo para el equipo de Azul Clarito.</p>
+        {invitacion === "aceptada" && <Notice tone="success" className="mt-6">Tu acceso está listo. Ingresá con tu correo y la contraseña que acabás de crear.</Notice>}
         <div className="mt-8">
           <LoginForm action={loginAction} />
         </div>

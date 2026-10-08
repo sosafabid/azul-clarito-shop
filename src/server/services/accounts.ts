@@ -178,6 +178,11 @@ export async function deleteAccount(db: Database, userId: string, password: stri
       .update(auditLogs)
       .set({ metadata: sql`coalesce(${auditLogs.metadata}, '{}'::jsonb) - 'actor'` })
       .where(eq(auditLogs.actorUserId, userId)),
+    // Los registros sobre ESTA cuenta (cambios de rol) tampoco conservan su correo ni quién actuó con su nombre.
+    db
+      .update(auditLogs)
+      .set({ metadata: sql`coalesce(${auditLogs.metadata}, '{}'::jsonb) - 'targetEmail'` })
+      .where(and(eq(auditLogs.entityType, "user"), eq(auditLogs.entityId, userId))),
     auditInsert(db, { actorUserId: null, label: "cuenta eliminada" }, [
       { action: "account.deleted", entityType: "user", entityId: userId, metadata: {} },
     ]),

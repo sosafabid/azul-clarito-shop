@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { routes } from "@/config/routes";
 import { legalConfig } from "@/config/legal";
 import { getDb, isDatabaseConfigured } from "@/db";
@@ -8,6 +9,7 @@ import { parseRegistrationForm } from "@/domain/customer-form";
 import { endSession, startSession } from "@/server/auth";
 import { attemptLogin } from "@/server/services/auth/login";
 import { registerCustomer } from "@/server/services/accounts";
+import { prepareVerificationEmail } from "@/server/services/auth/recovery";
 import { mergeCartOnLogin } from "@/server/services/cart/request";
 
 /**
@@ -86,7 +88,15 @@ export async function registerAction(_previous: RegisterState, formData: FormDat
     return { errors: {}, message: result.message };
   }
 
+  // Correo de verificación (de marca, vía Resend). Si el envío falla, la cuenta igual queda creada:
+  // desde la cuenta se puede pedir un reenvío. Se envía DESPUÉS de responder.
+  try {
+    after(await prepareVerificationEmail(getDb(), { id: result.userId, email: parsed.data.email, name: parsed.data.name }));
+  } catch (error) {
+    console.error("[auth] No se pudo preparar el correo de verificación:", error instanceof Error ? error.name : "error");
+  }
+
   await startSession(result.userId);
   await mergeCartOnLogin(result.userId); // el carrito de invitada se conserva y se fusiona
-  redirect(`${routes.account}?bienvenida=1`);
+  redirect(routes.verifyEmail);
 }

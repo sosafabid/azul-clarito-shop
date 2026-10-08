@@ -24,12 +24,15 @@ export function VariantForm({
   expectedAvailableStock,
   submitLabel,
   currencyHint,
+  caps,
 }: {
   action: (previous: ProductFormState, formData: FormData) => Promise<ProductFormState>;
   initial: VariantFormValues;
   expectedAvailableStock?: number;
   submitLabel: string;
   currencyHint: string;
+  /** Presentación según permisos (la Server Action vuelve a aplicar la restricción). */
+  caps: { costs: boolean; stock: boolean };
 }) {
   const [state, formAction, pending] = useActionState(action, null);
   const errors = state?.errors ?? {};
@@ -58,8 +61,12 @@ export function VariantForm({
       </label>
       <div className="grid gap-3 sm:grid-cols-3">
         {field("Precio propio", "price", errors.price, `Vacío = usa el del producto (${currencyHint})`)}
-        {field("Costo propio", "cost", errors.cost, "Vacío = usa el del producto")}
-        {field("Stock disponible", "availableStock", errors.availableStock)}
+        {caps.costs && field("Costo propio", "cost", errors.cost, "Vacío = usa el del producto")}
+        {caps.stock ? (
+          field("Stock disponible", "availableStock", errors.availableStock)
+        ) : (
+          <p className="self-end rounded-xl bg-celeste/35 px-3 py-2 text-xs text-ink/80">Solo una persona SUPER_ADMIN registra el stock.</p>
+        )}
       </div>
       <label className="flex items-center gap-2 font-display text-sm font-bold text-navy">
         <input type="checkbox" name="isActive" defaultChecked={initial.isActive} className="size-4 accent-navy" />

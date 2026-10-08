@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { can } from "./permissions";
+import { PERMISSIONS, can, permissionsOf } from "./permissions";
 import { hasAtLeastRole, isStaffRole } from "./roles";
 
 describe("roles", () => {
@@ -43,5 +43,32 @@ describe("permisos", () => {
   it("SUPER_ADMIN puede todo lo sensible", () => {
     expect(can("SUPER_ADMIN", "orders:refund")).toBe(true);
     expect(can("SUPER_ADMIN", "users:manage-roles")).toBe(true);
+  });
+});
+
+describe("matriz de autorización (fase usuarios y roles)", () => {
+  it("solo SUPER_ADMIN gestiona usuarios, roles e invitaciones", () => {
+    for (const p of ["users:read", "users:manage-roles", "users:invite"] as const) {
+      expect(can("SUPER_ADMIN", p)).toBe(true);
+      expect(can("STAFF", p)).toBe(false);
+      expect(can("CUSTOMER", p)).toBe(false);
+    }
+  });
+
+  it("STAFF: tareas operativas sí; costos, impuestos, envíos, integraciones, auditoría y publicación no", () => {
+    for (const p of ["products:read", "products:write", "inventory:read", "orders:read", "orders:fulfill", "orders:customer-delivery-data"] as const) {
+      expect(can("STAFF", p), p).toBe(true);
+    }
+    for (const p of ["products:publish", "products:delete", "inventory:write", "costs:read", "settings:read", "settings:write", "integrations:manage", "audit:read", "customers:read", "orders:refund"] as const) {
+      expect(can("STAFF", p), p).toBe(false);
+    }
+  });
+
+  it("CUSTOMER no tiene ningún permiso del panel", () => {
+    expect(permissionsOf("CUSTOMER")).toEqual([]);
+  });
+
+  it("SUPER_ADMIN tiene todos los permisos de la matriz", () => {
+    expect(permissionsOf("SUPER_ADMIN").length).toBe(Object.keys(PERMISSIONS).length);
   });
 });
