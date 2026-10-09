@@ -2,10 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  experimental: {
-    // Por defecto las Server Actions rechazan cuerpos de más de 1 MB: no alcanzaría para subir una foto.
-    serverActions: { bodySizeLimit: "5mb" },
-  },
   poweredByHeader: false,
   images: {
     formats: ["image/avif", "image/webp"],

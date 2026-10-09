@@ -3,12 +3,11 @@
 import { redirect } from "next/navigation";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
-import { MAX_IMAGES_PER_PRODUCT, parseImageUrls } from "@/domain/images";
-import { collectFiles } from "@/server/admin-forms";
+import { parseImageUrls } from "@/domain/images";
 import { requirePermission } from "@/server/auth";
 import { resolveAuditActor } from "@/server/services/audit";
 import { addProductImages, moveProductImage, removeProductImage, setPrimaryImage, updateImageAlt } from "@/server/services/catalog/admin-images";
-import { deleteStoredImages, storeProductImages } from "@/server/services/images/storage";
+import { deleteUnusedImages } from "@/server/services/images/storage";
 import type { ProductFormState } from "./products";
 
 /** Acciones de la galería de imágenes. Todas exigen permiso de escritura en el servidor. */
@@ -20,46 +19,39 @@ export async function addImagesAction(productId: string, _previous: ProductFormS
 
   const urls = parseImageUrls(String(formData.get("imageUrls") ?? ""));
   if (urls.errors.length > 0) return { errors: { imageUrls: urls.errors[0] } };
-  const files = collectFiles(formData, "imageFiles");
-  if (urls.urls.length + files.length === 0) return { errors: {}, message: "Elegí un archivo o pegá al menos una URL." };
-  if (urls.urls.length + files.length > MAX_IMAGES_PER_PRODUCT) return { errors: {}, message: `Máximo ${MAX_IMAGES_PER_PRODUCT} imágenes por producto.` };
+  if (urls.urls.length === 0) return { errors: {}, message: "Pegá al menos una URL https. Para subir archivos usá el selector de arriba." };
 
-  const uploaded = await storeProductImages(productId, files);
-  if (!uploaded.ok) return { errors: { imageFiles: uploaded.message } };
-
-  const result = await addProductImages(getDb(), productId, [...uploaded.images, ...urls.urls.map((url) => ({ url }))], resolveAuditActor(session));
-  if (!result.ok) {
-    await deleteStoredImages(uploaded.images.map((image) => image.url));
-    return { errors: {}, message: result.message };
-  }
+  const result = await addProductImages(getDb(), productId, urls.urls.map((url) => ({ url })), resolveAuditActor(session));
+  if (!result.ok) return { errors: {}, message: result.message };
   redirect(back(productId, "image-added"));
 }
 
 export async function removeImageAction(productId: string, imageId: string): Promise<void> {
   const session = await requirePermission("products:write");
   if (!isDatabaseConfigured()) redirect(back(productId, "action-failed"));
-  const result = await removeProductImage(getDb(), imageId, resolveAuditActor(session));
-  if (result.ok && result.removed?.storageKey) await deleteStoredImages([result.removed.url]);
+  const result = await removeProductImage(getDb(), productId, imageId, resolveAuditActor(session));
+  // La fila ya se quitó; el archivo se borra solo si ya nada lo usa (otra ficha o un pedido histórico).
+  if (result.ok && result.removed?.storageKey) await deleteUnusedImages(getDb(), [{ url: result.removed.url, storageKey: result.removed.storageKey }]);
   redirect(back(productId, result.ok ? "image-removed" : "action-failed"));
 }
 
 export async function setPrimaryImageAction(productId: string, imageId: string): Promise<void> {
   const session = await requirePermission("products:write");
   if (!isDatabaseConfigured()) redirect(back(productId, "action-failed"));
-  const result = await setPrimaryImage(getDb(), imageId, resolveAuditActor(session));
+  const result = await setPrimaryImage(getDb(), productId, imageId, resolveAuditActor(session));
   redirect(back(productId, result.ok ? "image-primary" : "action-failed"));
 }
 
 export async function moveImageAction(productId: string, imageId: string, direction: string): Promise<void> {
   await requirePermission("products:write");
   if (!isDatabaseConfigured() || (direction !== "up" && direction !== "down")) redirect(back(productId, "action-failed"));
-  const result = await moveProductImage(getDb(), imageId, direction);
+  const result = await moveProductImage(getDb(), productId, imageId, direction);
   redirect(back(productId, result.ok ? "image-moved" : "action-failed"));
 }
 
 export async function updateImageAltAction(productId: string, imageId: string, formData: FormData): Promise<void> {
   await requirePermission("products:write");
   if (!isDatabaseConfigured()) redirect(back(productId, "action-failed"));
-  const result = await updateImageAlt(getDb(), imageId, String(formData.get("alt") ?? ""));
+  const result = await updateImageAlt(getDb(), productId, imageId, String(formData.get("alt") ?? ""));
   redirect(back(productId, result.ok ? "image-updated" : "action-failed"));
 }

@@ -573,7 +573,7 @@ export async function getDeleteInfo(db: Database, id: string): Promise<DeleteInf
 }
 
 export type DeleteResult =
-  | { ok: true; storedImageUrls: string[] }
+  | { ok: true; storedImages: { url: string; storageKey: string }[] }
   | { ok: false; code: "not_found" | "blocked"; message: string; blockers?: DeleteBlocker[] };
 
 /**
@@ -587,7 +587,7 @@ export async function deleteProduct(db: Database, id: string, actor: AuditActor)
   if (!info) return { ok: false, code: "not_found", message: "Producto no encontrado." };
 
   const stored = await db
-    .select({ url: productImages.url })
+    .select({ url: productImages.url, storageKey: productImages.storageKey })
     .from(productImages)
     .where(and(eq(productImages.productId, id), sql`${productImages.storageKey} is not null`));
 
@@ -613,5 +613,5 @@ export async function deleteProduct(db: Database, id: string, actor: AuditActor)
     const blockers = await getDeleteBlockers(db, id);
     return { ok: false, code: "blocked", blockers, message: "Este producto tiene historial de ventas: no se puede eliminar, pero sí archivar." };
   }
-  return { ok: true, storedImageUrls: stored.map((s) => s.url) };
+  return { ok: true, storedImages: stored.flatMap((s) => (s.storageKey ? [{ url: s.url, storageKey: s.storageKey }] : [])) };
 }

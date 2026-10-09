@@ -14,6 +14,21 @@ export function extensionForImage(type: string): string | null {
   return EXTENSIONS[type] ?? null;
 }
 
+/**
+ * Tipo REAL de la imagen según sus primeros bytes ("firma" del formato). Nunca se confía en el nombre,
+ * la extensión ni el `Content-Type` que manda el navegador: un ejecutable renombrado a .jpg no pasa.
+ */
+export function sniffImageType(bytes: Uint8Array): (typeof ALLOWED_IMAGE_TYPES)[number] | null {
+  const at = (offset: number, ...values: number[]) => values.every((value, index) => bytes[offset + index] === value);
+  if (bytes.length >= 3 && at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (bytes.length >= 8 && at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  // WebP: "RIFF" + tamaño + "WEBP"
+  if (bytes.length >= 12 && at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
+  // AVIF: caja "ftyp" en el byte 4 con la marca "avif" o "avis"
+  if (bytes.length >= 12 && at(4, 0x66, 0x74, 0x79, 0x70) && (at(8, 0x61, 0x76, 0x69, 0x66) || at(8, 0x61, 0x76, 0x69, 0x73))) return "image/avif";
+  return null;
+}
+
 /** Valida un archivo subido. Devuelve un mensaje en español, o `null` si es válido. */
 export function validateImageFile(file: { type: string; size: number }): string | null {
   if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
@@ -88,4 +103,64 @@ export function describeUploadError(error: unknown): string {
     return "El almacenamiento está configurado como privado. Creá un Blob store de acceso Público para las imágenes de la tienda.";
   }
   return "No se pudo subir la imagen al almacenamiento. Intentá de nuevo; si sigue fallando, revisá los registros del servidor.";
+}
+
+
+// ───────────────────────── referencias a archivos ya subidos ─────────────────────────
+/**
+ * Rutas de los archivos en el almacenamiento:
+ *   products/<idDelProducto>/<uuid>.<ext>        producto que ya existe
+ *   products/pending/<idDeQuienSube>/<uuid>.<ext>  producto que todavía no se guardó
+ * La ruta dice a quién pertenece cada archivo: así una petición manipulada no puede "adoptar" ni borrar
+ * archivos de otro producto o de otra persona.
+ */
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const BLOB_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/;
+
+export type StorageScope = { kind: "product"; productId: string } | { kind: "pending"; userId: string };
+
+export function storageKeyFor(scope: StorageScope, extension: string): string {
+  const folder = scope.kind === "product" ? scope.productId : `pending/${scope.userId}`;
+  return `products/${folder}/${crypto.randomUUID()}.${extension}`;
+}
+
+export function isKeyInScope(key: string, scope: StorageScope): boolean {
+  const id = scope.kind === "product" ? scope.productId : scope.userId;
+  if (!new RegExp(`^${UUID}$`).test(id)) return false; // el id va dentro de una expresión regular: solo UUID
+  const folder = scope.kind === "product" ? scope.productId : `pending/${scope.userId}`;
+  return new RegExp(`^products/${folder}/${UUID}\\.(jpg|png|webp|avif)$`).test(key);
+}
+
+export type ImageItem = { url: string; storageKey?: string };
+
+/**
+ * Lee la lista de imágenes que envía el formulario (JSON). Cada elemento es una URL externa https, o un
+ * archivo ya subido: en ese caso la clave debe pertenecer al ámbito indicado y la URL debe apuntar
+ * EXACTAMENTE a esa clave en el almacenamiento público. Cualquier otra cosa se rechaza.
+ */
+export function parseImageItems(raw: string, allowedScopes: readonly StorageScope[]): { ok: true; items: ImageItem[] } | { ok: false; error: string } {
+  if (raw.trim() === "") return { ok: true, items: [] };
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "La lista de imágenes no es válida. Recargá la página e intentá de nuevo." };
+  }
+  if (!Array.isArray(data) || data.length > MAX_IMAGES_PER_PRODUCT) {
+    return { ok: false, error: `Máximo ${MAX_IMAGES_PER_PRODUCT} imágenes por producto.` };
+  }
+  const items: ImageItem[] = [];
+  for (const entry of data) {
+    const url = typeof entry?.url === "string" ? entry.url : "";
+    const key = typeof entry?.storageKey === "string" ? entry.storageKey : undefined;
+    const parsed = parseImageUrl(url);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    if (key !== undefined) {
+      const parsedUrl = new URL(parsed.url);
+      const valid = allowedScopes.some((scope) => isKeyInScope(key, scope)) && BLOB_HOST.test(parsedUrl.hostname) && parsedUrl.pathname === `/${key}` && !parsedUrl.search;
+      if (!valid) return { ok: false, error: "Una de las imágenes subidas no es válida. Subila de nuevo." };
+    }
+    if (!items.some((item) => item.url === parsed.url)) items.push(key ? { url: parsed.url, storageKey: key } : { url: parsed.url });
+  }
+  return { ok: true, items };
 }

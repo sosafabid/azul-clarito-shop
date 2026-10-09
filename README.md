@@ -46,7 +46,7 @@ defecto **la tienda ya funciona en tu computadora** (no pide base de datos todav
 | `DATABASE_URL` | Conexión a Neon (con pooling) | Al usar la base de datos |
 | `DATABASE_URL_UNPOOLED` | Conexión directa de Neon, para migraciones | Opcional (recomendada) |
 | `AUTH_SECRET` | Opcional: refuerza el HMAC de los contadores anti-abuso (`auth_throttle`) | Recomendada en producción (cualquier texto largo aleatorio) |
-| `BLOB_READ_WRITE_TOKEN` | Almacenamiento de imágenes (Vercel Blob) | Para SUBIR archivos desde el panel (por URL no hace falta) |
+| `BLOB_READ_WRITE_TOKEN` | Almacenamiento de imágenes (Vercel Blob) | Para SUBIR archivos desde el panel (por URL no hace falta). Secreto de servidor |
 | `RESEND_API_KEY` | Clave de Resend. **Solo servidor** | Para enviar correos (verificación y restablecimiento) |
 | `RESEND_FROM_EMAIL` | Remitente, p. ej. `Azul Clarito <cuenta@TU-DOMINIO-VERIFICADO>`. El dominio **debe estar verificado en Resend** | Para enviar correos (`EMAIL_FROM` se sigue aceptando como alternativa) |
 | `ADMIN_NOTIFY_EMAIL` | Aviso de pedidos nuevos a management | Cuando haya pedidos |
@@ -282,9 +282,7 @@ Antes del primer `commit`, comprobá que no se suba nada sensible: `git status`
 - **Variantes:** un producto sin variantes es simple (una fila de inventario). Al agregar la primera variante, el stock pasa a
   gestionarse por variante (el producto debe tener stock propio en 0 antes). Cada variante tiene SKU, opciones (Talla: M),
   precio/costo opcionales y su propio inventario.
-- **Imágenes:** en la base solo se guarda la referencia (`product_images`). Se asocian por **URL https** o se **suben** a Vercel
-  Blob (requiere `BLOB_READ_WRITE_TOKEN`; JPG/PNG/WebP/AVIF, máx. 4 MB por envío). Hasta 10 por producto, con principal, orden y texto
-  alternativo. La tienda las muestra sin optimizar (`unoptimized`) hasta que se defina el dominio del CDN en `next.config.ts`.
+- **Imágenes:** en la base solo se guarda la referencia (`product_images`: URL pública + clave). Se suben a Vercel Blob o se asocian por **URL https**. Ver la sección "Imágenes de productos (Vercel Blob)" más abajo. La tienda las muestra sin optimizar (`unoptimized`) hasta que se defina el dominio del CDN en `next.config.ts`.
 - **Auditoría** (`audit_logs`): creación, edición (con lista de campos), cambios de precio/costo/moneda/stock (antes y después),
   publicar, ocultar, archivar, restaurar, eliminación, imágenes, variantes e inicios de sesión.
 
@@ -427,6 +425,21 @@ Tres roles (el sistema de autenticación es el mismo de siempre: no hay otro):
 **Auditoría** (`audit_logs`): `staff_invited`, `staff_invitation_accepted`, `staff_invitation_revoked`, `user_role_changed`, `staff_access_suspended`, `staff_access_reactivated`, `user_administrative_access_removed`, con quién actuó, la cuenta afectada, rol anterior y nuevo, resultado (`success`/`denied`) y fecha. Nunca contraseñas, tokens ni secretos. Al eliminar una cuenta se borra el correo de sus registros.
 
 **`scripts/create-admin.ts`** no degrada a una SUPER_ADMIN existente. Migraciones nuevas: `0010_staff_invitations` (tabla) y `0011_protect_last_super_admin` (trigger); ninguna modifica ni borra datos de `users`.
+
+## Imágenes de productos (Vercel Blob)
+
+**Flujo.** El navegador nunca recibe el token: sube cada archivo a `POST /api/admin/product-images` (única ruta API del proyecto) y es el servidor quien lo sube a Blob. La ruta valida, en este orden y siempre en el servidor: mismo origen → sesión → permiso `products:write` (SUPER_ADMIN o STAFF) → límite de frecuencia → tamaño (≤ 4 MB) → **contenido real** (firma de bytes JPG/PNG/WebP/AVIF; se ignoran nombre, extensión y `Content-Type`) → máximo 10 por producto. Los nombres se generan (`products/<producto>/<uuid>.<ext>`), así que nada se sobrescribe.
+
+- **Producto existente:** cada archivo se sube y se vincula (fila en `product_images`) en la misma petición; si la base falla, el archivo se borra.
+- **Producto nuevo:** los archivos van a `products/pending/<tu-id>/…`; al guardar, el servidor acepta solo claves de esa carpeta (propias), verifica con Blob que existen y los vincula en el orden elegido (la primera es la principal). Quitar una imagen pendiente la borra del almacenamiento.
+- **Quitar de la ficha:** se borra la fila (por id, y solo si pertenece a ese producto) y después el archivo, **solo si ninguna otra ficha ni ningún pedido** (`order_items.image_url_snapshot`) lo usa. Si el borrado físico falla se registra el error (sin secretos) y la base queda consistente. Las imágenes por URL externa nunca se borran.
+- **Sobrantes:** si alguien sube fotos y cierra el formulario sin guardar, quedan en `products/pending/`. `npm run images:cleanup` lista los de más de 24 h que nadie usa (`-- --apply` los borra).
+
+**Activarlo en Vercel (una sola vez):**
+1. Proyecto en Vercel → **Storage** → **Create** → **Blob** → acceso **Public** → **Connect Project** (selecciona el proyecto y los entornos Production/Preview/Development). Vercel agrega `BLOB_READ_WRITE_TOKEN` solo.
+2. Para correr en local: `vercel env pull .env.local` (o copiá el valor a `.env.local`). Nunca lo subas a GitHub.
+3. Volvé a desplegar para que el entorno tome la variable.
+Sin la variable el panel lo explica y sigue permitiendo imágenes por URL.
 
 ## Seguridad de dependencias
 

@@ -33,8 +33,15 @@ export async function listProductImages(db: Database, productId: string): Promis
     .orderBy(desc(productImages.isPrimary), asc(productImages.sortOrder), asc(productImages.createdAt));
 }
 
+/** Cantidad de imágenes del producto, o `null` si el producto no existe. */
+export async function countProductImages(db: Database, productId: string): Promise<number | null> {
+  if (!(await productInfo(db, productId))) return null;
+  const [row] = await db.select({ n: count() }).from(productImages).where(eq(productImages.productId, productId));
+  return row?.n ?? 0;
+}
+
 export type ImageResult =
-  | { ok: true; removed?: { url: string; storageKey: string | null } }
+  | { ok: true; removed?: { url: string; storageKey: string | null }; added?: { id: string; url: string; isPrimary: boolean }[] }
   | { ok: false; message: string };
 
 async function productInfo(db: Database, productId: string) {
@@ -57,36 +64,40 @@ export async function addProductImages(db: Database, productId: string, images: 
     return { ok: false, message: `Un producto admite hasta ${MAX_IMAGES_PER_PRODUCT} imágenes (ya tiene ${existing}).` };
   }
 
-  await db.batch([
-    db.insert(productImages).values(
-      images.map((image, index) => ({
-        productId,
-        url: image.url,
-        storageKey: image.storageKey ?? null,
-        alt: product.name,
-        sortOrder: (stats?.maxOrder ?? -1) + 1 + index,
-        isPrimary: existing === 0 && index === 0,
-      })),
-    ),
+  const [inserted] = await db.batch([
+    db
+      .insert(productImages)
+      .values(
+        images.map((image, index) => ({
+          productId,
+          url: image.url,
+          storageKey: image.storageKey ?? null,
+          alt: product.name,
+          sortOrder: (stats?.maxOrder ?? -1) + 1 + index,
+          isPrimary: existing === 0 && index === 0,
+        })),
+      )
+      .returning({ id: productImages.id, url: productImages.url, isPrimary: productImages.isPrimary }),
     auditInsert(db, actor, [
       { action: "product.image_added", entityType: "product", entityId: productId, metadata: { count: images.length, productName: product.name, sku: product.sku } },
     ]),
   ]);
-  return { ok: true };
+  return { ok: true, added: inserted };
 }
 
-async function loadImage(db: Database, imageId: string) {
-  if (!isUuid(imageId)) return null;
+/** La imagen solo se encuentra si pertenece al producto indicado: un id de otra ficha no sirve. */
+async function loadImage(db: Database, productId: string, imageId: string) {
+  if (!isUuid(imageId) || !isUuid(productId)) return null;
   const [row] = await db
     .select({ id: productImages.id, productId: productImages.productId, url: productImages.url, storageKey: productImages.storageKey, isPrimary: productImages.isPrimary })
     .from(productImages)
-    .where(eq(productImages.id, imageId))
+    .where(and(eq(productImages.id, imageId), eq(productImages.productId, productId)))
     .limit(1);
   return row ?? null;
 }
 
-export async function removeProductImage(db: Database, imageId: string, actor: AuditActor): Promise<ImageResult> {
-  const image = await loadImage(db, imageId);
+export async function removeProductImage(db: Database, productId: string, imageId: string, actor: AuditActor): Promise<ImageResult> {
+  const image = await loadImage(db, productId, imageId);
   if (!image) return { ok: false, message: "Imagen no encontrada." };
   const product = await productInfo(db, image.productId);
 
@@ -114,8 +125,8 @@ export async function removeProductImage(db: Database, imageId: string, actor: A
   return { ok: true, removed: { url: image.url, storageKey: image.storageKey } };
 }
 
-export async function setPrimaryImage(db: Database, imageId: string, actor: AuditActor): Promise<ImageResult> {
-  const image = await loadImage(db, imageId);
+export async function setPrimaryImage(db: Database, productId: string, imageId: string, actor: AuditActor): Promise<ImageResult> {
+  const image = await loadImage(db, productId, imageId);
   if (!image) return { ok: false, message: "Imagen no encontrada." };
   const product = await productInfo(db, image.productId);
   await db.batch([
@@ -128,19 +139,24 @@ export async function setPrimaryImage(db: Database, imageId: string, actor: Audi
   return { ok: true };
 }
 
-/** Mueve una imagen una posición hacia arriba o hacia abajo en el orden de la galería. */
-export async function moveProductImage(db: Database, imageId: string, direction: "up" | "down"): Promise<ImageResult> {
-  const image = await loadImage(db, imageId);
+/**
+ * Mueve una imagen una posición hacia arriba o hacia abajo, en el MISMO orden en que se ve la galería:
+ * la principal siempre va primera y el resto por `sort_order`. La principal no se mueve con las flechas
+ * (se elige con "Hacer principal") y nada puede subir por encima de ella.
+ */
+export async function moveProductImage(db: Database, productId: string, imageId: string, direction: "up" | "down"): Promise<ImageResult> {
+  const image = await loadImage(db, productId, imageId);
   if (!image) return { ok: false, message: "Imagen no encontrada." };
   const ordered = await db
-    .select({ id: productImages.id })
+    .select({ id: productImages.id, isPrimary: productImages.isPrimary })
     .from(productImages)
     .where(eq(productImages.productId, image.productId))
-    .orderBy(asc(productImages.sortOrder), asc(productImages.createdAt));
+    .orderBy(desc(productImages.isPrimary), asc(productImages.sortOrder), asc(productImages.createdAt));
 
   const index = ordered.findIndex((row) => row.id === imageId);
+  const firstMovable = ordered[0]?.isPrimary ? 1 : 0;
   const target = direction === "up" ? index - 1 : index + 1;
-  if (index < 0 || target < 0 || target >= ordered.length) return { ok: true };
+  if (index < firstMovable || target < firstMovable || target >= ordered.length) return { ok: true };
 
   const ids = ordered.map((row) => row.id);
   [ids[index], ids[target]] = [ids[target], ids[index]];
@@ -149,8 +165,9 @@ export async function moveProductImage(db: Database, imageId: string, direction:
   return { ok: true };
 }
 
-export async function updateImageAlt(db: Database, imageId: string, alt: string): Promise<ImageResult> {
-  if (!isUuid(imageId)) return { ok: false, message: "Imagen no encontrada." };
+export async function updateImageAlt(db: Database, productId: string, imageId: string, alt: string): Promise<ImageResult> {
+  const image = await loadImage(db, productId, imageId);
+  if (!image) return { ok: false, message: "Imagen no encontrada." };
   const text = alt.trim().slice(0, 200);
   await db.update(productImages).set({ alt: text || null }).where(eq(productImages.id, imageId));
   return { ok: true };

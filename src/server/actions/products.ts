@@ -5,10 +5,10 @@ import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { catalogCapabilities } from "@/domain/capabilities";
 import { BELOW_COST_MESSAGE_FOR_STAFF, constrainProductInput, priceBelowStoredCost } from "@/domain/catalog-limits";
-import { MAX_IMAGES_PER_PRODUCT } from "@/domain/images";
+import { MAX_IMAGES_PER_PRODUCT, parseImageItems, type ImageItem } from "@/domain/images";
 import { parseProductForm } from "@/domain/product-form";
 import { deleteConfirmationMatches, isProductAction } from "@/domain/product-lifecycle";
-import { formToRecord, collectFiles, safeProductsReturn } from "@/server/admin-forms";
+import { formToRecord, safeProductsReturn } from "@/server/admin-forms";
 import { requirePermission } from "@/server/auth";
 import { resolveAuditActor } from "@/server/services/audit";
 import {
@@ -17,10 +17,9 @@ import {
   getAdminProduct,
   deleteProduct,
   updateProduct,
-  type ImageRef,
   type SaveProductResult,
 } from "@/server/services/catalog/admin";
-import { deleteStoredImages, storeProductImages } from "@/server/services/images/storage";
+import { deleteUnusedImages, verifyStoredImages } from "@/server/services/images/storage";
 
 /**
  * SERVER ACTIONS DE PRODUCTOS — escriben en la base de datos.
@@ -49,21 +48,18 @@ export async function createProductAction(_previous: ProductFormState, formData:
   // Quien no tiene permiso de costos / stock / publicación NO puede fijarlos, aunque fabrique la petición.
   const data = constrainProductInput(parsed.data, catalogCapabilities(session.role));
 
-  const files = collectFiles(formData, "imageFiles");
-  if (data.imageUrls.length + files.length > MAX_IMAGES_PER_PRODUCT) {
-    return { errors: { imageUrls: `Máximo ${MAX_IMAGES_PER_PRODUCT} imágenes por producto.` } };
-  }
+  // Las imágenes llegan ya subidas por /api/admin/product-images (lista JSON en orden; la primera es la principal).
+  // Solo se aceptan archivos de la carpeta "pendiente" de ESTA persona o URLs externas https.
+  const parsedItems = parseImageItems(String(formData.get("imageItems") ?? ""), [{ kind: "pending", userId: session.userId }]);
+  if (!parsedItems.ok) return { errors: { imageUrls: parsedItems.error } };
+  const images: ImageItem[] = [...parsedItems.items, ...data.imageUrls.filter((url) => !parsedItems.items.some((item) => item.url === url)).map((url) => ({ url }))];
+  if (images.length > MAX_IMAGES_PER_PRODUCT) return { errors: { imageUrls: `Máximo ${MAX_IMAGES_PER_PRODUCT} imágenes por producto.` } };
+  const verified = await verifyStoredImages(images);
+  if (!verified.ok) return { errors: { imageUrls: verified.message } };
 
   const productId = crypto.randomUUID();
-  const uploaded = await storeProductImages(productId, files);
-  if (!uploaded.ok) return { errors: { imageFiles: uploaded.message } };
-
-  const images: ImageRef[] = [...uploaded.images, ...data.imageUrls.map((url) => ({ url }))];
   const result = await createProduct(getDb(), data, resolveAuditActor(session), images, productId);
-  if (!result.ok) {
-    await deleteStoredImages(uploaded.images.map((image) => image.url)); // no dejar archivos huérfanos
-    return failure(result);
-  }
+  if (!result.ok) return failure(result); // las imágenes subidas se conservan: la persona corrige el formulario y vuelve a guardar
 
   redirect(`${routes.adminProduct(result.id)}?saved=created`);
 }
@@ -129,6 +125,6 @@ export async function deleteProductAction(id: string, sku: string, _previous: De
   const result = await deleteProduct(getDb(), id, resolveAuditActor(session));
   if (!result.ok) return { message: result.message };
 
-  await deleteStoredImages(result.storedImageUrls);
+  await deleteUnusedImages(getDb(), result.storedImages);
   redirect(`${routes.adminProducts}?saved=deleted`);
 }

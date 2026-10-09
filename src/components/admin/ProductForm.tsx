@@ -5,7 +5,7 @@ import { DEFAULT_CURRENCY, SUPPORTED_CURRENCIES, formatMoney, parseMoneyInput, t
 import { formatPercent, inventoryEconomics, unitEconomics } from "@/domain/product-economics";
 import { slugify } from "@/domain/slug";
 import type { ProductFormState } from "@/server/actions/products";
-import { ImageFileInput, StorageSetupNotice } from "./ImageFileInput";
+import { ImageUploader } from "./ImageUploader";
 import { Notice } from "./Notice";
 
 export type ProductFormValues = {
@@ -79,6 +79,7 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
   const [values, setValues] = useState<ProductFormValues>(initial);
   const [slugTouched, setSlugTouched] = useState(mode === "edit");
   const [confirmLoss, setConfirmLoss] = useState(false);
+  const [imagesBusy, setImagesBusy] = useState(false);
 
   const errors = state?.errors ?? {};
   const set = <K extends keyof ProductFormValues>(key: K, value: ProductFormValues[K]) =>
@@ -301,18 +302,10 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
         <section className="space-y-5 rounded-3xl border border-celeste bg-paper p-5 sm:p-7">
           <div>
             <h2 className="text-xl font-bold">Imágenes</h2>
-            <p className="mt-1 text-sm text-ink/70">
-              Subí archivos (JPG, PNG, WebP o AVIF, máx. 4 MB cada uno) y/o pegá URLs https. La primera será la principal. También
-              podés agregarlas después, desde la ficha del producto.
-            </p>
+            <p className="mt-1 text-sm text-ink/70">Subí las fotos ahora o agregalas después desde la ficha del producto.</p>
           </div>
-          {!uploadsEnabled && <StorageSetupNotice />}
-          <Field label="Archivos" error={errors.imageFiles}>
-            <ImageFileInput name="imageFiles" disabled={!uploadsEnabled} />
-          </Field>
-          <Field label="URLs de imágenes (una por línea)" error={errors.imageUrls}>
-            <textarea name="imageUrls" rows={3} value={values.imageUrls} onChange={(e) => set("imageUrls", e.target.value)} className={inputClass} placeholder="https://…" />
-          </Field>
+          <ImageUploader mode="create" uploadsEnabled={uploadsEnabled} onBusyChange={setImagesBusy} />
+          {errors.imageUrls && <p role="alert" className="text-xs font-semibold text-coral">{errors.imageUrls}</p>}
         </section>
       )}
 
@@ -363,10 +356,10 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={pending || imagesBusy}
         className="inline-flex min-h-12 items-center justify-center rounded-full bg-navy px-8 py-3 font-display font-bold text-paper transition-colors hover:bg-ink disabled:opacity-60"
       >
-        {pending ? "Guardando…" : mode === "create" ? "Crear producto" : "Guardar cambios"}
+        {pending ? "Guardando…" : imagesBusy ? "Subiendo imágenes…" : mode === "create" ? "Crear producto" : "Guardar cambios"}
       </button>
     </form>
   );

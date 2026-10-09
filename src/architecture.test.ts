@@ -113,9 +113,36 @@ describe("autorización en el servidor", () => {
     expect(read(join(SRC, "app/admin/(panel)/layout.tsx"))).toMatch(/await requireStaff\(\)/);
   });
 
-  it("no hay rutas API (route handlers) que modifiquen datos", () => {
+  it("la ÚNICA ruta API es la de subida de imágenes, y autoriza en el servidor antes de tocar nada", () => {
     const handlers = all.filter((p) => /\/route\.ts$/.test(rel(p)));
-    expect(handlers.map(rel)).toEqual([]);
+    expect(handlers.map(rel)).toEqual(["src/app/api/admin/product-images/route.ts"]);
+    const source = stripComments(read(handlers[0]));
+    // cada método (POST y DELETE) pasa por authorize() antes de leer el cuerpo o tocar el almacenamiento
+    for (const method of ["POST", "DELETE"]) {
+      const chunk = source.slice(source.indexOf(`export async function ${method}`));
+      expect(chunk.indexOf("await authorize(request)"), method).toBeGreaterThanOrEqual(0);
+      expect(chunk.indexOf("await authorize(request)"), method).toBeLessThan(chunk.search(/formData\(\)|request\.json\(\)|put[A-Z]\w*\(|deleteUnusedImages\(/));
+    }
+    expect(source).toMatch(/getSession\(\)/);
+    expect(source).toMatch(/can\(session\.role, "products:write"\)/);
+    expect(source).toMatch(/sniffImageType\(/);
+    expect(source).not.toMatch(/process\.env/);
+  });
+
+  it("el token de Blob solo lo lee el servidor: nunca el código del navegador ni una variable NEXT_PUBLIC", () => {
+    const readers = all.filter((p) => /process\.env\.BLOB_READ_WRITE_TOKEN/.test(stripComments(read(p)))).map(rel);
+    expect(readers.filter((f) => f.startsWith("src/") && !f.endsWith(".test.ts"))).toEqual(["src/server/services/images/storage.ts"]);
+    expect(all.some((p) => /NEXT_PUBLIC_.*BLOB/.test(read(p)))).toBe(false);
+    const clientFiles = all.filter((p) => rel(p).startsWith("src/") && /^\s*["']use client["']/.test(read(p)));
+    for (const file of clientFiles) expect(read(file), rel(file)).not.toMatch(/@vercel\/blob|server\/services\/images/);
+  });
+
+  it("borrar un archivo de Blob siempre pasa por la comprobación de que ya nada lo usa (galería y pedidos)", () => {
+    const storage = stripComments(read(join(SRC, "server/services/images/storage.ts")));
+    expect(storage).toMatch(/imageUrlSnapshot/);
+    expect(storage).toMatch(/productImages\.url/);
+    const callers = all.filter((p) => rel(p).startsWith("src/") && /\bdel\(/.test(stripComments(read(p))) && /@vercel\/blob/.test(read(p))).map(rel);
+    expect(callers).toEqual(["src/server/services/images/storage.ts"]);
   });
 });
 

@@ -19,7 +19,8 @@
     "db:studio": "drizzle-kit studio",
     "db:check": "drizzle-kit check",
     "db:ping": "tsx scripts/db-ping.ts",
-    "admin:create": "tsx --conditions=react-server scripts/create-admin.ts"
+    "admin:create": "tsx --conditions=react-server scripts/create-admin.ts",
+    "images:cleanup": "tsx scripts/cleanup-pending-images.ts"
   },
   "dependencies": {
     "@fontsource-variable/nunito": "^5.3.0",
