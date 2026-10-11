@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -17,6 +18,7 @@ import { orderStatusEnum } from "./enums";
 import { users } from "./users";
 import { products, productVariants } from "./catalog";
 import { shippingMethods } from "./shipping";
+import { carts } from "./carts";
 import { money, primaryId, timestamps } from "./common";
 
 /** Consecutivo de números de pedido (ver `src/domain/order-number.ts`). */
@@ -33,6 +35,14 @@ export const orders = pgTable(
     email: text("email").notNull(),
     customerName: text("customer_name"),
     customerPhone: text("customer_phone"),
+
+    /** Carrito del que salió el pedido (se vacía al confirmarse el pago). NULL si el carrito ya no existe. */
+    cartId: uuid("cart_id").references(() => carts.id, { onDelete: "set null" }),
+    /**
+     * Si llegó un pago que NO se pudo aplicar solo (p. ej. se aprobó DESPUÉS de que el pedido caducó o con un
+     * monto/ambiente distinto), aquí queda el motivo para que una persona del equipo lo revise. NULL = nada que revisar.
+     */
+    paymentReviewReason: text("payment_review_reason"),
 
     status: orderStatusEnum("status").notNull().default("PENDING"),
     currency: char("currency", { length: 3 }).notNull().default("CRC"),
@@ -92,6 +102,8 @@ export const orders = pgTable(
     index("orders_status_idx").on(t.status),
     index("orders_email_idx").on(t.email),
     index("orders_placed_at_idx").on(t.placedAt),
+    // Un carrito solo puede tener UN pedido pendiente de pago (frena el doble clic y los pedidos duplicados).
+    uniqueIndex("orders_one_pending_per_cart").on(t.cartId).where(sql`${t.status} = 'PENDING' AND ${t.cartId} IS NOT NULL`),
   ],
 );
 

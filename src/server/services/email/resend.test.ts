@@ -39,9 +39,9 @@ describe("cliente de Resend (solo servidor)", () => {
     expect(await service().send(request)).toEqual({ ok: false, reason: "provider_error" });
   });
 
-  it("los eventos de pedidos todavía no tienen plantilla: no se envía nada a medias", async () => {
+  it("los eventos de preparación/envío/entrega todavía no tienen plantilla: no se envía nada a medias", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
-    const result = await service().send({ event: "order_received", to: "a@b.co", data: { orderNumber: "1", total: 1, currency: "CRC" } });
+    const result = await service().send({ event: "order_delivered", to: "a@b.co", data: { orderNumber: "1", total: 1, currency: "CRC" } });
     expect(result).toEqual({ ok: false, reason: "no_template" });
     expect(fetchMock).not.toHaveBeenCalled();
   });

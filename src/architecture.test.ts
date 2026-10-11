@@ -78,8 +78,8 @@ describe("frontera pública / privada", () => {
 
 describe("autorización en el servidor", () => {
   it("cada Server Action exige sesión/permiso ANTES de tocar la base de datos", () => {
-    // login / registro / logout, recuperación de cuenta y el carrito son públicos por naturaleza (se prueban aparte, abajo).
-    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts") && !rel(p).endsWith("/actions/recovery.ts") && !rel(p).endsWith("/actions/staff-invitations.ts"));
+    // login / registro / logout, recuperación de cuenta, el carrito y el checkout son públicos por naturaleza (se prueban aparte, abajo).
+    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts") && !rel(p).endsWith("/actions/recovery.ts") && !rel(p).endsWith("/actions/staff-invitations.ts") && !rel(p).endsWith("/actions/checkout.ts"));
     expect(files.length).toBeGreaterThanOrEqual(4);
 
     for (const file of files) {
@@ -113,10 +113,10 @@ describe("autorización en el servidor", () => {
     expect(read(join(SRC, "app/admin/(panel)/layout.tsx"))).toMatch(/await requireStaff\(\)/);
   });
 
-  it("la ÚNICA ruta API es la de subida de imágenes, y autoriza en el servidor antes de tocar nada", () => {
+  it("las ÚNICAS rutas API son: subida de imágenes, retorno de Tilopay y conciliación programada", () => {
     const handlers = all.filter((p) => /\/route\.ts$/.test(rel(p)));
-    expect(handlers.map(rel)).toEqual(["src/app/api/admin/product-images/route.ts"]);
-    const source = stripComments(read(handlers[0]));
+    expect(handlers.map(rel).sort()).toEqual(["src/app/api/admin/product-images/route.ts", "src/app/api/cron/payments-reconcile/route.ts", "src/app/api/payments/tilopay/return/route.ts"]);
+    const source = stripComments(read(join(SRC, "app/api/admin/product-images/route.ts")));
     // cada método (POST y DELETE) pasa por authorize() antes de leer el cuerpo o tocar el almacenamiento
     for (const method of ["POST", "DELETE"]) {
       const chunk = source.slice(source.indexOf(`export async function ${method}`));
@@ -612,5 +612,138 @@ describe("verificación de correo y restablecimiento de contraseña", () => {
     const action = code("server/actions/auth.ts");
     expect(action).toMatch(/prepareVerificationEmail\(/);
     expect(action).not.toMatch(/formData\.get\(["']role["']\)/);
+  });
+});
+
+describe("pagos con Tilopay", () => {
+  const sources = () => all.filter((p) => !/\.test\.ts$/.test(p));
+  const code = (path: string) => stripComments(read(join(SRC, path)));
+
+  it("las credenciales de Tilopay se leen SOLO en el servidor (un único archivo) y ninguna es pública", () => {
+    const readers = sources().filter((p) => /(optionalEnv|requireEnv|process\.env)[.(]\s*["']?TILOPAY_/.test(stripComments(read(p)))).map(rel);
+    expect(readers).toEqual(["src/server/payments/tilopay/config.ts"]);
+    expect(all.some((p) => /NEXT_PUBLIC_TILOPAY|NEXT_PUBLIC_.*CRON/.test(read(p)))).toBe(false);
+    for (const file of sources().filter((p) => rel(p).startsWith("src/server/payments/"))) expect(read(file), rel(file)).toMatch(/^import "server-only";/m);
+    const clientFiles = sources().filter((p) => /^\s*["']use client["']/.test(read(p)));
+    for (const file of clientFiles) expect(read(file), rel(file)).not.toMatch(/tilopay\/(config|client)|TILOPAY_|serverConfig/i);
+  });
+
+  it("el cliente solo habla con el host oficial de Tilopay y no registra cuerpos, tokens ni claves", () => {
+    const client = code("server/payments/tilopay/client.ts");
+    expect(client).toMatch(/TILOPAY_API_HOST/);
+    expect(client).not.toMatch(/https?:\/\/(?!app\.tilopay\.com)[a-z]/i);
+    expect(client).not.toMatch(/console\.(log|info|debug)/);
+    expect(client).not.toMatch(/console\.error\([^)]*(body|token|password|apiUser|apiPassword|config\.key)/);
+    expect(code("domain/tilopay.ts")).toMatch(/TILOPAY_API_HOST = "https:\/\/app\.tilopay\.com"/);
+  });
+
+  it("falla cerrado: sin credenciales o con un modo desconocido no se cobra, y producción pide una confirmación explícita aparte", () => {
+    const config = code("server/payments/tilopay/config.ts");
+    expect(config).toMatch(/"sandbox"/);
+    expect(config).toMatch(/production_not_confirmed/);
+    expect(config).toMatch(/PRODUCTION_CONFIRMATION/);
+    expect(config).toMatch(/\?\? "sandbox"/); // el modo por defecto es sandbox
+  });
+
+  it("no hay formulario ni campo de tarjeta: ni números, ni CVV, ni vencimiento", () => {
+    const files = sources().filter((p) => rel(p).startsWith("src/components/checkout/") || rel(p).startsWith("src/app/(store)/checkout/") || rel(p).startsWith("src/server/actions/checkout"));
+    expect(files.length).toBeGreaterThanOrEqual(4);
+    for (const file of files) {
+      expect(stripComments(read(file)), rel(file)).not.toMatch(/name=["'](card|cardNumber|cc|ccnum|cvv|cvc|expiry|expMonth|expYear|pan)["']|autoComplete=["']cc-/i);
+    }
+    expect(stripComments(read(join(process.cwd(), "src/db/schema/payments.ts")))).not.toMatch(/card_number|cvv|cvc|\bpan\b/i);
+  });
+
+  it("el checkout nunca usa un monto del navegador: solo compara el total visto (seenTotal) con el recalculado", () => {
+    const actions = code("server/actions/checkout.ts");
+    const fields = [...actions.matchAll(/formData\.get\(["'](\w+)["']\)/g)].map((m) => m[1]).sort();
+    expect([...new Set(fields)]).toEqual(["seenTotal", "t", "website"]); // nada más viene del formulario
+    expect(actions).not.toMatch(/formData\.get\(["'](price|amount|total|subtotal|tax|shipping\w*|currency|orderId|userId)["']\)/);
+    expect(actions).toMatch(/calculateCheckoutTotals\(/);
+    expect(code("domain/checkout-form.ts")).not.toMatch(/get\("(price|amount|total|subtotal|tax|shipping\w*|currency)"\)/);
+    // el pedido se crea con el snapshot calculado en el servidor
+    expect(code("server/services/checkout/place-order.ts")).toMatch(/snapshot: totals\.snapshot/);
+  });
+
+  it("un pedido solo pasa a PAGADO en confirmPayment, y confirmPayment solo lo llama la verificación con el proveedor", () => {
+    const setters = sources().filter((p) => /set\s+status\s*=\s*'PAID'/i.test(read(p)) || /status:\s*["']PAID["']/.test(stripComments(read(p)))).map(rel);
+    expect(setters).toEqual(["src/server/services/payments/lifecycle.ts"]);
+    const callers = sources().filter((p) => /\bconfirmPayment\(/.test(stripComments(read(p))) && !rel(p).endsWith("payments/lifecycle.ts")).map(rel);
+    expect(callers).toEqual(["src/server/services/payments/verify.ts"]);
+    // y antes de confirmar, la verificación consulta a Tilopay y compara con el pedido guardado
+    const verify = code("server/services/payments/verify.ts");
+    expect(verify.indexOf("consultOrder(")).toBeGreaterThan(-1);
+    expect(verify.indexOf("consultOrder(")).toBeLessThan(verify.indexOf("confirmPayment("));
+    expect(verify).toMatch(/evaluateConsult\(/);
+  });
+
+  it("el retorno del navegador no decide nada: solo identifica el intento y dispara la verificación", () => {
+    const route = code("app/api/payments/tilopay/return/route.ts");
+    expect(route).toMatch(/verifyPayment\(/);
+    expect(route).not.toMatch(/confirmPayment|rejectPayment|cancelPendingOrder|UPDATE|update orders/i);
+    const reads = [...route.matchAll(/params\.get\(["']([\w-]+)["']\)/g)].map((m) => m[1]).sort();
+    expect(reads).toEqual(["code", "returnData"]); // y `code` solo queda en la bitácora marcado como no confiable
+    expect(route).toMatch(/trusted: false/);
+  });
+
+  it("la conciliación programada exige CRON_SECRET antes de tocar la base de datos", () => {
+    const route = code("app/api/cron/payments-reconcile/route.ts");
+    expect(route.indexOf("authorized(request)")).toBeGreaterThan(-1);
+    expect(route.indexOf("authorized(request)")).toBeLessThan(route.indexOf("getDb()"));
+    expect(route).toMatch(/timingSafeEqual/);
+    expect(route).toMatch(/cron_not_configured/);
+  });
+
+  it("no hay endpoint de webhook hasta contar con el contrato oficial de Tilopay (OrderHash y esquema no son públicos)", () => {
+    expect(all.filter((p) => /webhook/i.test(rel(p)) && rel(p).startsWith("src/app/")).map(rel)).toEqual([]);
+  });
+
+  it("el stock reservado/vendido solo cambia en los servicios de pedido y pago (nunca en el carrito ni en páginas)", () => {
+    const writers = sources().filter((p) => /reserved_stock\s*=|sold_stock\s*=/.test(stripComments(read(p)))).map(rel).sort();
+    expect(writers).toEqual(["src/server/services/orders/create.ts", "src/server/services/payments/lifecycle.ts"]);
+  });
+
+  it("la reserva y la creación del pedido son UNA sentencia atómica y condicionada, con vencimiento", () => {
+    const create = code("server/services/orders/create.ts");
+    expect(create).toMatch(/with lines as/);
+    expect(create).toMatch(/update inventory/);
+    expect(create).toMatch(/insert into orders/);
+    expect(create).toMatch(/insert into inventory_reservations/);
+    expect(create).toMatch(/expires_at/);
+    expect(create).not.toMatch(/\.transaction\(/);
+    const lifecycle = code("server/services/payments/lifecycle.ts");
+    expect(lifecycle).toMatch(/status = 'COMMITTED'/);
+    expect(lifecycle).toMatch(/status = 'RELEASED'/);
+  });
+
+  it("el panel de pedidos no permite marcar un pago como aprobado a mano y exige permiso en cada acción", () => {
+    const actions = read(join(SRC, "server/actions/orders.ts"));
+    expect(actions).not.toMatch(/markPaid|mark_paid|simulate|forcePaid|approvePayment/i);
+    for (const chunk of actions.split(/export async function /).slice(1)) {
+      const name = chunk.slice(0, chunk.indexOf("("));
+      expect(chunk.indexOf('await requirePermission("orders:fulfill")'), name).toBeGreaterThanOrEqual(0);
+      expect(chunk.indexOf('await requirePermission("orders:fulfill")'), name).toBeLessThan(chunk.search(/getDb\(|isDatabaseConfigured\(/));
+    }
+    for (const page of ["app/admin/(panel)/orders/page.tsx", "app/admin/(panel)/orders/[id]/page.tsx"]) expect(read(join(SRC, page)), page).toMatch(/await requirePermission\("orders:read"\)/);
+  });
+
+  it("el panel de pedidos no muestra costos ni el costo real del envío", () => {
+    for (const file of ["server/services/orders/admin.ts", "app/admin/(panel)/orders/page.tsx", "app/admin/(panel)/orders/[id]/page.tsx", "components/admin/OrderActions.tsx"]) {
+      expect(code(file), file).not.toMatch(/unitCost|unit_cost|shippingActualCost|shipping_actual_cost|margin|profit/i);
+    }
+  });
+
+  it("los correos de compra se reclaman antes de enviarse (sin duplicados) y un fallo de correo nunca revierte el pago", () => {
+    const notify = code("server/services/orders/notify.ts");
+    expect(notify.indexOf("await claim(")).toBeGreaterThan(-1);
+    expect(notify.indexOf("await claim(")).toBeLessThan(notify.indexOf("service.send("));
+    expect(notify).toMatch(/catch \(error\)/);
+    expect(code("server/services/payments/verify.ts")).not.toMatch(/sendOrderEmail[^;]*\bthrow\b/);
+  });
+
+  it("los pagos y los pedidos nunca se borran para limpiar errores", () => {
+    for (const file of sources().filter((p) => rel(p).startsWith("src/server/services/payments/") || rel(p).startsWith("src/server/services/orders/"))) {
+      expect(stripComments(read(file)), rel(file)).not.toMatch(/delete from (orders|payments|payment_events|order_items|order_notifications)|\.delete\((orders|payments)\)/i);
+    }
   });
 });

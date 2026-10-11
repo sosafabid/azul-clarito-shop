@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
+import { releaseExpiredReservations } from "@/server/services/payments/reconcile";
 import { categories, productImages, productVariants, products } from "@/db/schema";
 import { stockState } from "@/domain/inventory-view";
 import type {
@@ -67,6 +68,7 @@ function toListItem(row: ListRow): PublicProductListItem {
 }
 
 export async function listPublicProducts(db: Database): Promise<PublicProductListItem[]> {
+  await releaseExpiredReservations(db);
   const rows = await db
     .select(listColumns)
     .from(products)
@@ -77,6 +79,7 @@ export async function listPublicProducts(db: Database): Promise<PublicProductLis
 }
 
 export async function getPublicProductBySlug(db: Database, slug: string): Promise<PublicProductDetail | null> {
+  await releaseExpiredReservations(db);
   const [row] = await db
     .select(listColumns)
     .from(products)

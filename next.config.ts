@@ -28,6 +28,9 @@ const nextConfig: NextConfig = {
       { source: "/reset-password", headers: privateLinkHeaders },
       { source: "/verify-email", headers: privateLinkHeaders },
       { source: "/staff-invitation", headers: privateLinkHeaders },
+      // Resultado del pago: el enlace privado lleva un token aleatorio.
+      { source: "/checkout/result", headers: privateLinkHeaders },
+      { source: "/api/payments/tilopay/return", headers: privateLinkHeaders },
     ];
   },
 };

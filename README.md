@@ -50,7 +50,12 @@ defecto **la tienda ya funciona en tu computadora** (no pide base de datos todav
 | `RESEND_API_KEY` | Clave de Resend. **Solo servidor** | Para enviar correos (verificación y restablecimiento) |
 | `RESEND_FROM_EMAIL` | Remitente, p. ej. `Azul Clarito <cuenta@TU-DOMINIO-VERIFICADO>`. El dominio **debe estar verificado en Resend** | Para enviar correos (`EMAIL_FROM` se sigue aceptando como alternativa) |
 | `ADMIN_NOTIFY_EMAIL` | Aviso de pedidos nuevos a management | Cuando haya pedidos |
-| `PAYMENT_PROVIDER`, `PAYMENT_PROVIDER_SECRET` | Pagos | Cuando se elija proveedor |
+| `TILOPAY_API_USER`, `TILOPAY_API_PASSWORD`, `TILOPAY_API_KEY` | Credenciales de la API de Tilopay. **Solo servidor, secretas** | Para cobrar. Sin ellas el checkout muestra "pago no disponible" |
+| `TILOPAY_MERCHANT_ID` | Id de comercio, si Tilopay lo exige en `consult` | Opcional |
+| `TILOPAY_MODE` | `sandbox` (por defecto). Un valor desconocido deshabilita los pagos | Opcional |
+| `TILOPAY_CONFIRM_PRODUCTION` | Segundo seguro: `production` solo funciona si vale `SI_COBRAR_DE_VERDAD` | **No la definas** hasta aprobar el paso a producción |
+| `TILOPAY_CURRENCIES` | Monedas aceptadas (por defecto `CRC`) | Opcional |
+| `CRON_SECRET` | Secreto del cron de conciliación (`Authorization: Bearer`) | Recomendada; sin ella el endpoint responde 503 |
 | `NEXT_PUBLIC_SITE_URL` (o `NEXT_PUBLIC_APP_URL`, que tiene prioridad) | URL pública de la tienda; con ella se arman los enlaces de los correos | En Vercel: `https://shop.azulclaritocr.com`. En producción **solo** se aceptan dominios `https` públicos: `localhost`, IPs y `*.vercel.app` se ignoran y se usa `https://shop.azulclaritocr.com` |
 | `NEXT_PUBLIC_CONTACT_EMAIL` | Correo público de contacto | Opcional |
 
@@ -71,7 +76,7 @@ Abrí <http://localhost:3000>. Rutas disponibles:
 | `/shop` | **Lee productos ACTIVOS desde PostgreSQL** (si no hay ninguno, "Próximamente") |
 | `/shop/[slug]` | **Ficha de producto desde PostgreSQL**: nombre, descripción, precio, imagen (si existe) y disponibilidad. Slug inexistente o inactivo → 404 |
 | `/cart` | **Carrito** (invitada o con sesión): líneas, cantidades, eliminar, subtotal y estado vacío |
-| `/checkout` | **Resumen del checkout**: provincia/cantón (país fijo Costa Rica), "Envío nacional", subtotal, impuestos, envío y total (calculados en el servidor). Todavía sin pago ni orden |
+| `/checkout` | **Resumen del checkout**: provincia/cantón (país fijo Costa Rica), "Envío nacional", subtotal, impuestos, envío y total (calculados en el servidor). Crea el pedido y redirige al pago de Tilopay |
 | `/admin/taxes`, `/admin/shipping` | **Impuestos** y **Envíos**: el equipo los ve; solo SUPER_ADMIN los cambia |
 | `/account/register`, `/account/login` | **Crear cuenta** (nombre, correo, teléfono opcional, contraseña y consentimientos) e **ingresar** |
 | `/account` | **Mi cuenta** (requiere sesión): editar datos, ver y cambiar consentimientos (con historial), cambiar contraseña y eliminar la cuenta |
@@ -441,6 +446,45 @@ Tres roles (el sistema de autenticación es el mismo de siempre: no hay otro):
 3. Volvé a desplegar para que el entorno tome la variable.
 Sin la variable el panel lo explica y sigue permitiendo imágenes por URL.
 
+## Pagos con Tilopay (Hosted Payment Page, sandbox)
+
+La clienta paga en la página alojada de Tilopay: la tienda **nunca** ve ni guarda
+número de tarjeta ni CVV.
+
+Flujo: `/checkout` → el servidor recalcula precios, impuestos y envío desde la base
+(nunca confía en montos del navegador) → crea un pedido `PENDING` con copias históricas
+y **reserva el stock 30 minutos** en una sola sentencia atómica → pide la sesión a
+Tilopay → redirige. Al volver, `/api/payments/tilopay/return` **no decide nada**: solo
+dispara una consulta servidor-a-servidor (`consult`) y compara orden, monto, moneda y
+entorno contra lo guardado. Solo `confirmPayment` (en `lifecycle.ts`) marca `PAID`.
+Rechazo, cancelación o vencimiento liberan la reserva una sola vez. Las reservas vencidas se resuelven (verificando antes con Tilopay) al abrir producto, tienda, carrito o checkout, al chocar con "sin stock" y en la tarea programada; esta última (`vercel.json`, diaria porque el plan Hobby no admite más; cada 5 min solo en Pro) y `npm run payments:reconcile` recuperan pagos cuyo navegador nunca volvió. Procedimientos, migraciones y pruebas de sandbox: `docs/PAGOS-TILOPAY-PROCEDIMIENTOS.md`.
+
+- **No hay webhook** ni validación de `OrderHash`: Tilopay no publica esos contratos.
+  No se inventan; ver la lista de preguntas abajo.
+- **Producción deshabilitada**: modo por defecto `sandbox`; producción exige
+  `TILOPAY_MODE=production` **y** `TILOPAY_CONFIRM_PRODUCTION=SI_COBRAR_DE_VERDAD`.
+  En sandbox solo se acepta `environment == "Test"`; si el portal estuviera en vivo, el
+  pedido queda marcado para revisión en vez de confirmarse.
+- No existe "marcar como pagado" manual. STAFF/SUPER_ADMIN ven pedidos en `/admin/orders`;
+  la pasarela solo la ve SUPER_ADMIN. Reembolsos: no implementados (contrato no documentado).
+
+### Obtener las credenciales de sandbox
+(Versión detallada y segura, incluida la prueba `npm run tilopay:check`, en `docs/PAGOS-TILOPAY-PROCEDIMIENTOS.md`, sección 0.)
+
+1. Entrá al portal de Tilopay y dejá la cuenta en **modo de pruebas**.
+2. En *Admin · Tilopay Checkout* copiá `apiuser`, `password` y `key`.
+3. Pegalos en `.env.local` y en Vercel (Settings → Environment Variables) como
+   `TILOPAY_API_USER`, `TILOPAY_API_PASSWORD`, `TILOPAY_API_KEY`. Nunca en Git.
+4. Definí `CRON_SECRET` (texto largo aleatorio) y aplicá las migraciones: `npm run db:migrate`.
+5. Probá con las tarjetas de prueba de la documentación de Tilopay.
+
+### A pedir a soporte@tilopay.com
+Algoritmo de `OrderHash`; especificación y autenticación del webhook; valores de `code`,
+`type` y `environment`; respuesta de `consult` cuando no existe la orden; largo máximo de
+`orderNumber`; tipos de `processModification` (reembolso/captura/reverso); monedas permitidas;
+si `key` es pública o secreta; diferencias de credenciales entre prueba y producción;
+vigencia de la URL del formulario de pago.
+
 ## Seguridad de dependencias
 
 `npm audit --omit=dev` (lo que corre en producción) → **0 vulnerabilidades**.
@@ -459,11 +503,10 @@ cuando los autores publiquen sus actualizaciones.
 - Revisión legal de `/terminos` y `/privacidad` (ver abajo)
 - Gestión de usuarios del equipo desde el panel (hoy se crean con `npm run admin:create`)
 - Importación de inventario real, subida de imágenes (almacenamiento/CDN), variantes en el panel y categorías en el panel
-- Checkout real, órdenes, pagos y reserva de stock (el carrito ya existe, pero **no reserva** inventario)
+- Webhook y reembolsos de Tilopay (esperan el contrato oficial)
 - Limpieza automática de carritos de invitada abandonados (`carts.updated_at` ya queda guardado)
 - Eventos de analytics del carrito (add_to_cart, view_cart…)
-- Pagos (proveedor compatible con Costa Rica por elegir)
-- Emails de pedidos (confirmación, envío…): los eventos existen en `email/events.ts` pero aún no tienen plantilla
+- Emails de envío/entrega (los de pedido recibido, pago, fallo y cancelación ya existen)
 - Cálculo de envíos (la primera versión será manual)
 - Imágenes/productos reales (los bloques de la home son placeholders)
 

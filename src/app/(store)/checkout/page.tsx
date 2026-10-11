@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CheckoutForm, PendingOrderPanel } from "@/components/checkout/CheckoutForm";
 import { ProductImage } from "@/components/shop/ProductImage";
 import { ComingSoon } from "@/components/ui/ComingSoon";
 import { Container } from "@/components/ui/Container";
@@ -10,7 +11,11 @@ import { formatMoney, toCurrency } from "@/domain/money";
 import { COUNTRY_ONLY_MESSAGE, CR_PROVINCES, STORE_COUNTRY_NAME, parseDestination } from "@/domain/shipping";
 import { formatBps } from "@/domain/tax";
 import { cn } from "@/lib/utils";
+import { getSession } from "@/server/auth";
+import { isPaymentsEnabled } from "@/server/payments/tilopay/config";
+import { getPendingOrderForCart } from "@/server/services/checkout/place-order";
 import { calculateCheckoutTotals } from "@/server/services/checkout/totals";
+import { settleExpiredOrders } from "@/server/services/payments/reconcile";
 import { getCartOwner } from "@/server/services/cart/identity";
 
 export const metadata: Metadata = { title: "Finalizar compra", robots: { index: false, follow: false } };
@@ -26,7 +31,8 @@ const row = "flex items-baseline justify-between gap-4";
  *  - La URL solo trae el destino (provincia, ciudad, código postal). Nunca montos: el subtotal, el impuesto, el envío
  *    y el total salen de `calculateCheckoutTotals`, que lo lee todo de PostgreSQL.
  *  - El envío es un único método, "Envío nacional", con la tarifa que Azul Clarito configuró. La logística real es manual.
- * Todavía no hay pago ni orden: el botón final queda deshabilitado.
+ *  - Con el envío resuelto, aparece el formulario de datos y "Pagar con tarjeta": el servidor crea el pedido pendiente (reservando el
+ *    stock) y redirige a la página de pago de Tilopay. Aquí NO hay campos de tarjeta.
  */
 export default async function CheckoutPage({ searchParams }: { searchParams: Promise<{ pais?: string; provincia?: string; ciudad?: string; cp?: string }> }) {
   if (!isDatabaseConfigured()) {
@@ -34,7 +40,15 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   }
   const params = await searchParams;
   const { destination, countryRejected } = parseDestination(params);
-  const { totals, cart } = await calculateCheckoutTotals(getDb(), { owner: await getCartOwner(), destination, shippingMethodId: null });
+  const owner = await getCartOwner();
+  // Antes de calcular disponibilidad: las reservas VENCIDAS (30 min) se verifican con Tilopay y, si no se pagaron, devuelven su stock.
+  // Sin freno: quien está comprando ve la disponibilidad real (verificada con Tilopay) al instante.
+  if (isPaymentsEnabled()) await settleExpiredOrders(getDb(), { limit: 5, source: "expiry" }).catch(() => undefined);
+  const { totals, cart } = await calculateCheckoutTotals(getDb(), { owner, destination, shippingMethodId: null });
+  // Un carrito con un pedido pendiente de pago lo retoma o lo cancela; no se crean pedidos duplicados.
+  const pending = owner ? await getPendingOrderForCart(getDb(), owner) : null;
+  const session = await getSession();
+  const paymentsEnabled = isPaymentsEnabled();
   const currency = toCurrency(totals.currency);
   const money = (amount: number) => formatMoney(amount, currency);
 
@@ -70,6 +84,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
         )}
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_24rem] lg:items-start">
+          <div className="space-y-6">
           <form method="get" action={routes.checkout} className="space-y-6">
             <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
               <legend className="px-2 font-display text-xl font-bold text-navy">¿A dónde lo enviamos?</legend>
@@ -88,9 +103,9 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                   </select>
                 </label>
                 <label className="font-display text-sm font-bold text-navy">Ciudad / cantón<input name="ciudad" defaultValue={destination?.city ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
-                <label className="font-display text-sm font-bold text-navy">Código postal (opcional)<input name="cp" defaultValue={destination?.postalCode ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
+                <label className="font-display text-sm font-bold text-navy">Código postal (5 dígitos)<input name="cp" required inputMode="numeric" pattern="[0-9]{5}" maxLength={5} defaultValue={destination?.postalCode ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
               </div>
-              <p className="mt-3 text-xs text-ink/60">La dirección completa de entrega se pide en el siguiente paso.</p>
+              <p className="mt-3 text-xs text-ink/60">La dirección exacta y tus datos se piden en el siguiente paso.</p>
             </fieldset>
 
             <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
@@ -115,6 +130,14 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
             </fieldset>
             <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">Actualizar resumen</button>
           </form>
+          {pending ? (
+            <PendingOrderPanel orderNumber={pending.orderNumber} total={money(pending.total)} />
+          ) : !paymentsEnabled ? (
+            <Notice tone="warning">El pago en línea no está disponible por el momento. Escribinos y te ayudamos a completar tu compra.</Notice>
+          ) : totals.canProceed && totals.total !== null && destination ? (
+            <CheckoutForm province={destination.province ?? ""} city={destination.city ?? ""} postalCode={destination.postalCode ?? ""} seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
+          ) : null}
+          </div>
 
           <aside className="rounded-3xl border border-celeste bg-celeste/20 p-6 lg:sticky lg:top-32" aria-label="Resumen de la compra">
             <h2 className="text-xl font-bold">Resumen</h2>
@@ -156,8 +179,6 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
               {totals.total === null && totals.blockers.length === 0 && <p className="text-xs text-ink/60">El total aparece cuando el envío tenga costo para tu destino.</p>}
             </dl>
 
-            <button type="button" disabled aria-disabled="true" aria-describedby="pay-soon" className="mt-6 inline-flex min-h-12 w-full cursor-not-allowed items-center justify-center rounded-full bg-navy/40 px-8 py-3 font-display font-bold text-paper">Continuar al pago</button>
-            <p id="pay-soon" className="mt-2 text-center text-sm font-semibold text-navy/80">{totals.canProceed ? "El pago estará disponible próximamente." : "Para continuar necesitamos un envío válido para tu destino."}</p>
           </aside>
         </div>
       </Container>

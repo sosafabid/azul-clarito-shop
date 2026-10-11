@@ -17,6 +17,7 @@ import {
   variantLabel,
 } from "@/domain/cart";
 import { isUuid } from "@/domain/ids";
+import { releaseExpiredReservations } from "@/server/services/payments/reconcile";
 import type { CartMutation, CartOwner, CartView, CartLineView } from "./types";
 
 /**
@@ -79,6 +80,7 @@ type Resolution = { ok: true; item: Purchasable } | { ok: false; code: string; m
  * 3) precio actual · 4) inventario disponible.
  */
 async function resolvePurchasable(db: Database, productId: string, variantId: string | null): Promise<Resolution> {
+  await releaseExpiredReservations(db);
   if (!isUuid(productId) || (variantId !== null && !isUuid(variantId))) {
     return { ok: false, code: "not_found", message: NOT_AVAILABLE };
   }
@@ -209,6 +211,7 @@ export async function removeLine(db: Database, owner: CartOwner, lineId: string)
 const EMPTY_VIEW: CartView = { lines: [], currency: null, subtotal: 0, totalUnits: 0, hasIssues: false };
 
 export async function getCartView(db: Database, owner: CartOwner): Promise<CartView> {
+  await releaseExpiredReservations(db);
   const cartId = await findCartId(db, owner);
   if (!cartId) return EMPTY_VIEW;
 

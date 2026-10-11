@@ -1,7 +1,8 @@
-import { check, index, integer, pgTable, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { productVariants, products } from "./catalog";
 import { primaryId } from "./common";
+import { orders } from "./orders";
 
 /**
  * Inventario por unidad vendible:
@@ -50,3 +51,33 @@ export const inventory = pgTable(
 );
 
 export type InventoryRow = typeof inventory.$inferSelect;
+
+/**
+ * RESERVAS de stock de un pedido pendiente de pago. Mientras el pedido espera el pago, las unidades pasan de
+ * `available_stock` a `reserved_stock`; la reserva tiene VENCIMIENTO (`expires_at`) y termina de UNA sola forma:
+ *   ACTIVE → COMMITTED (pago confirmado: reserved → sold)   o   ACTIVE → RELEASED (falló, se canceló o venció: reserved → available).
+ * Una reserva resuelta nunca vuelve a ACTIVE: así ningún reintento ni evento repetido puede descontar dos veces.
+ */
+export const inventoryReservations = pgTable(
+  "inventory_reservations",
+  {
+    id: primaryId(),
+    orderId: uuid("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "restrict" }),
+    inventoryId: uuid("inventory_id")
+      .notNull()
+      .references(() => inventory.id, { onDelete: "restrict" }),
+    quantity: integer("quantity").notNull(),
+    status: text("status", { enum: ["ACTIVE", "COMMITTED", "RELEASED"] }).notNull().default("ACTIVE"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    check("inventory_reservations_quantity_positive", sql`${t.quantity} > 0`),
+    uniqueIndex("inventory_reservations_order_inventory_unique").on(t.orderId, t.inventoryId),
+    index("inventory_reservations_active_expiry_idx").on(t.expiresAt).where(sql`${t.status} = 'ACTIVE'`),
+  ],
+);
+export type InventoryReservation = typeof inventoryReservations.$inferSelect;

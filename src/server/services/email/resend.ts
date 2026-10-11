@@ -2,14 +2,26 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { EmailResult, EmailService } from "./service";
 import type { EmailEvent, EmailRequest } from "./events";
-import { renderEmailVerification, renderPasswordChanged, renderPasswordReset, renderStaffInvitation, type RenderedEmail } from "./templates";
+import {
+  renderAdminNewOrder,
+  renderAdminPaymentReview,
+  renderEmailVerification,
+  renderOrderCancelled,
+  renderOrderReceived,
+  renderPasswordChanged,
+  renderPasswordReset,
+  renderPaymentConfirmed,
+  renderPaymentFailed,
+  renderStaffInvitation,
+  type RenderedEmail,
+} from "./templates";
 
 /**
  * Proveedor Resend, llamado por HTTPS directo (API REST) desde el SERVIDOR.
  * La clave (`RESEND_API_KEY`) nunca sale de aquí: no se registra en logs ni llega al navegador.
  *
- * Solo se arman los correos de la cuenta; los de pedidos todavía no tienen plantilla
- * (se devuelven como `no_template` en vez de enviar algo a medias).
+ * Se arman los correos de la cuenta y los de compra (recibido, pago confirmado, pago fallido, cancelado, aviso de venta).
+ * Preparación, envío, entrega y reembolso todavía no tienen plantilla (se devuelven como `no_template`).
  */
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const TIMEOUT_MS = 10_000;
@@ -28,6 +40,18 @@ export class ResendEmailService implements EmailService {
         return renderPasswordChanged(request.data as never, baseUrl);
       case "staff_invitation":
         return renderStaffInvitation(request.data as never, baseUrl);
+      case "order_received":
+        return renderOrderReceived(request.data as never, baseUrl);
+      case "payment_confirmed":
+        return renderPaymentConfirmed(request.data as never, baseUrl);
+      case "payment_failed":
+        return renderPaymentFailed(request.data as never, baseUrl);
+      case "order_cancelled":
+        return renderOrderCancelled(request.data as never, baseUrl);
+      case "admin_new_order":
+        return renderAdminNewOrder(request.data as never, baseUrl);
+      case "admin_payment_review":
+        return renderAdminPaymentReview(request.data as never, baseUrl);
       default:
         return null;
     }

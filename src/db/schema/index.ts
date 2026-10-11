@@ -13,5 +13,6 @@ export * from "./inventory";
 export * from "./shipping";
 export * from "./orders";
 export * from "./payments";
+export * from "./payment-events";
 export * from "./audit";
 export * from "./relations";

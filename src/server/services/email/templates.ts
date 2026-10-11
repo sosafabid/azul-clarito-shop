@@ -1,4 +1,6 @@
-import type { EmailEventMap } from "./events";
+import { siteConfig } from "@/config/site";
+import { formatMoney } from "@/domain/money";
+import type { EmailEventMap, OrderSummaryEmailData } from "./events";
 
 /**
  * PLANTILLAS DE CORREO de la cuenta. Funciones puras (texto → HTML) sin acceso a red.
@@ -181,5 +183,134 @@ export function renderStaffInvitation(data: EmailEventMap["staff_invitation"], b
     `La invitación es personal, de un solo uso y vence en ${hours} horas. Si no esperabas este mensaje, ignorala.`,
     "Azul Clarito · Limón, Costa Rica",
   ]);
+  return { subject, html, text };
+}
+
+// ── Correos de COMPRA ────────────────────────────────────────────────────────
+// Regla de redacción: un correo nunca afirma un cobro que no esté VERIFICADO con el proveedor de pagos.
+
+function orderLinesHtml(data: OrderSummaryEmailData): string {
+  const rows = data.items
+    .map((item) => `<tr><td style="padding:6px 0;font-size:15px;color:${COLORS.ink};">${escapeHtml(item.name)} × ${item.quantity}</td><td align="right" style="padding:6px 0;font-size:15px;color:${COLORS.ink};white-space:nowrap;">${escapeHtml(formatMoney(item.lineTotal, data.currency))}</td></tr>`)
+    .join("");
+  const line = (label: string, value: string, strong = false) =>
+    `<tr><td style="padding:4px 0;font-size:${strong ? 17 : 14}px;${strong ? "font-weight:bold;" : ""}color:${COLORS.navy};">${escapeHtml(label)}</td><td align="right" style="padding:4px 0;font-size:${strong ? 17 : 14}px;${strong ? "font-weight:bold;" : ""}color:${COLORS.navy};white-space:nowrap;">${escapeHtml(value)}</td></tr>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 16px 0;">${rows}<tr><td colspan="2" style="border-top:1px solid ${COLORS.celeste};font-size:0;line-height:0;">&nbsp;</td></tr>${line("Subtotal", formatMoney(data.subtotal, data.currency))}${line(data.taxIncluded ? "Impuestos (incluidos)" : "Impuestos", formatMoney(data.taxTotal, data.currency))}${line("Envío", data.shippingTotal === 0 ? "Gratis" : formatMoney(data.shippingTotal, data.currency))}${line("Total", formatMoney(data.total, data.currency), true)}</table>`;
+}
+
+function orderLinesText(data: OrderSummaryEmailData): string {
+  const lines = data.items.map((item) => `- ${item.name} × ${item.quantity}: ${formatMoney(item.lineTotal, data.currency)}`);
+  return [...lines, `Subtotal: ${formatMoney(data.subtotal, data.currency)}`, `Impuestos${data.taxIncluded ? " (incluidos)" : ""}: ${formatMoney(data.taxTotal, data.currency)}`, `Envío: ${data.shippingTotal === 0 ? "Gratis" : formatMoney(data.shippingTotal, data.currency)}`, `Total: ${formatMoney(data.total, data.currency)}`].join("\n");
+}
+
+const contactNote = () => `Si tenés dudas, escribinos a ${siteConfig.contact.email}.`;
+
+export function renderOrderReceived(data: EmailEventMap["order_received"], baseUrl: string): RenderedEmail {
+  const subject = `Recibimos tu pedido ${data.orderNumber} — Azul Clarito`;
+  const intro = `${greeting(data.customerName)}, recibimos tu pedido ${data.orderNumber}.`;
+  const html = layout({
+    baseUrl,
+    preheader: "Estamos esperando la confirmación de tu pago.",
+    title: "Recibimos tu pedido",
+    paragraphs: [
+      `${escapeHtml(intro)} Estamos esperando la confirmación del pago: <strong>todavía no hemos confirmado ningún cobro</strong>. Apenas se confirme, te avisamos por acá.`,
+      orderLinesHtml(data),
+      `Destino de entrega: ${escapeHtml(data.destination)}.`,
+    ],
+    button: data.statusUrl ? { label: "Ver el estado de mi pedido", url: data.statusUrl } : undefined,
+    notes: [contactNote()],
+  });
+  const text = plain([intro, "Estamos esperando la confirmación del pago: todavía no hemos confirmado ningún cobro. Apenas se confirme, te avisamos.", orderLinesText(data), `Destino de entrega: ${data.destination}.`, data.statusUrl ? `Estado del pedido: ${data.statusUrl}` : undefined, contactNote()]);
+  return { subject, html, text };
+}
+
+export function renderPaymentConfirmed(data: EmailEventMap["payment_confirmed"], baseUrl: string): RenderedEmail {
+  const subject = `¡Pago confirmado! Pedido ${data.orderNumber} — Azul Clarito`;
+  const intro = `${greeting(data.customerName)}, ¡gracias por tu compra!`;
+  const html = layout({
+    baseUrl,
+    preheader: `Confirmamos el pago de tu pedido ${data.orderNumber}.`,
+    title: "¡Pago confirmado!",
+    paragraphs: [
+      `${escapeHtml(intro)} Confirmamos el pago de tu pedido <strong>${escapeHtml(data.orderNumber)}</strong>. Ya estamos preparando tus cosas con mucho cariño.`,
+      orderLinesHtml(data),
+      `Lo enviamos a: ${escapeHtml(data.destination)}. Cuando salga el paquete te avisamos con los datos de seguimiento.`,
+    ],
+    button: data.statusUrl ? { label: "Ver mi pedido", url: data.statusUrl } : undefined,
+    notes: [contactNote()],
+  });
+  const text = plain([intro, `Confirmamos el pago de tu pedido ${data.orderNumber}. Ya estamos preparando tus cosas.`, orderLinesText(data), `Lo enviamos a: ${data.destination}. Cuando salga el paquete te avisamos con los datos de seguimiento.`, data.statusUrl ? `Ver mi pedido: ${data.statusUrl}` : undefined, contactNote()]);
+  return { subject, html, text };
+}
+
+export function renderPaymentFailed(data: EmailEventMap["payment_failed"], baseUrl: string): RenderedEmail {
+  const subject = `No pudimos confirmar tu pago — Pedido ${data.orderNumber}`;
+  const intro = `${greeting(data.customerName)}, el pago de tu pedido ${data.orderNumber} no fue aprobado.`;
+  const html = layout({
+    baseUrl,
+    preheader: "Tu pedido sigue guardado por un tiempo limitado.",
+    title: "No pudimos confirmar tu pago",
+    paragraphs: [
+      `${escapeHtml(intro)} Tu pedido sigue guardado por un tiempo limitado, así que podés intentar de nuevo con la misma tarjeta u otra.`,
+      "Si tu banco te muestra algún cargo que no veas reflejado en tu pedido, escribinos y lo revisamos juntas.",
+    ],
+    button: data.statusUrl ? { label: "Reintentar el pago", url: data.statusUrl } : undefined,
+    notes: [contactNote()],
+  });
+  const text = plain([intro, "Tu pedido sigue guardado por un tiempo limitado: podés intentar de nuevo con la misma tarjeta u otra.", data.statusUrl ? `Reintentar el pago: ${data.statusUrl}` : undefined, "Si tu banco te muestra algún cargo que no veas reflejado en tu pedido, escribinos y lo revisamos.", contactNote()]);
+  return { subject, html, text };
+}
+
+export function renderOrderCancelled(data: EmailEventMap["order_cancelled"], baseUrl: string): RenderedEmail {
+  const subject = `Cancelamos tu pedido ${data.orderNumber} — Azul Clarito`;
+  const intro = `${greeting(data.customerName)}, cancelamos el pedido ${data.orderNumber} porque no recibimos la confirmación del pago.`;
+  const html = layout({
+    baseUrl,
+    preheader: "Los productos volvieron a estar disponibles.",
+    title: "Pedido cancelado",
+    paragraphs: [`${escapeHtml(intro)} Los productos volvieron a estar disponibles en la tienda.`, "Si de todos modos se te hizo un cargo, escribinos con tu número de pedido y lo resolvemos."],
+    button: { label: "Volver a la tienda", url: `${baseUrl}/shop` },
+    notes: [contactNote()],
+  });
+  const text = plain([intro, "Los productos volvieron a estar disponibles en la tienda.", "Si de todos modos se te hizo un cargo, escribinos con tu número de pedido y lo resolvemos.", contactNote()]);
+  return { subject, html, text };
+}
+
+export function renderAdminNewOrder(data: EmailEventMap["admin_new_order"], baseUrl: string): RenderedEmail {
+  const subject = `${data.needsReview ? "⚠ REVISAR · " : ""}Venta confirmada ${data.orderNumber} — ${formatMoney(data.total, data.currency)}`;
+  const who = `${(data.customerName ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim() || "(sin nombre)"} <${data.customerEmail}>`;
+  const html = layout({
+    baseUrl,
+    preheader: `Pago verificado con Tilopay por ${formatMoney(data.total, data.currency)}.`,
+    title: data.needsReview ? "Venta confirmada (requiere revisión)" : "Nueva venta confirmada",
+    paragraphs: [
+      `Pedido <strong>${escapeHtml(data.orderNumber)}</strong> de ${escapeHtml(who)}. El pago fue verificado con el proveedor${data.transactionId ? ` (transacción ${escapeHtml(data.transactionId)})` : ""}.`,
+      orderLinesHtml(data),
+      `Entrega: ${escapeHtml(data.destination)}. Envío manual: preparalo y anotá el seguimiento en el panel.`,
+      ...(data.needsReview ? [`<strong>Atención:</strong> este pedido tiene una alerta de pago pendiente de revisar en el panel.`] : []),
+    ],
+    button: { label: "Abrir el pedido en el panel", url: data.adminUrl },
+    notes: [],
+  });
+  const text = plain([`Pedido ${data.orderNumber} de ${who}. Pago verificado con el proveedor${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, orderLinesText(data), `Entrega: ${data.destination}.`, data.needsReview ? "ATENCIÓN: este pedido tiene una alerta de pago pendiente de revisar en el panel." : undefined, `Panel: ${data.adminUrl}`]);
+  return { subject, html, text };
+}
+
+export function renderAdminPaymentReview(data: EmailEventMap["admin_payment_review"], baseUrl: string): RenderedEmail {
+  const subject = `⚠ ACCIÓN REQUERIDA · Cobro sin pedido activo ${data.orderNumber} — ${formatMoney(data.total, data.currency)}`;
+  const who = `${(data.customerName ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim() || "(sin nombre)"} <${data.customerEmail}>`;
+  const html = layout({
+    baseUrl,
+    preheader: "Tilopay aprobó un cobro para un pedido que ya no estaba pendiente.",
+    title: "Hay un cobro que atender",
+    paragraphs: [
+      `Tilopay aprobó (verificado) un pago para el pedido <strong>${escapeHtml(data.orderNumber)}</strong> de ${escapeHtml(who)}${data.transactionId ? `, transacción ${escapeHtml(data.transactionId)}` : ""}.`,
+      escapeHtml(data.reason),
+      "No se envió ningún correo de confirmación a la clienta y el stock NO se tocó. Decidí: reembolsar en el portal de Tilopay o, si hay stock, crear/entregar el pedido manualmente, avisale a la clienta y dejá la nota de resolución en el panel.",
+    ],
+    button: { label: "Abrir el pedido en el panel", url: data.adminUrl },
+    notes: [],
+  });
+  const text = plain([`Tilopay aprobó un pago para el pedido ${data.orderNumber} de ${who}${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, data.reason, "No se envió confirmación a la clienta y el stock NO se tocó. Reembolsá en el portal de Tilopay o resolvé manualmente y dejá la nota en el panel.", `Panel: ${data.adminUrl}`]);
   return { subject, html, text };
 }
