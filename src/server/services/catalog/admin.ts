@@ -2,8 +2,9 @@ import "server-only";
 import { and, count, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { Database } from "@/db/client";
-import { categories, collections, inventory, orderItems, productImages, productVariants, products } from "@/db/schema";
+import { categories, digitalAssets, inventory, orderItems, productCollections, productImages, productVariants, products } from "@/db/schema";
 import type { ProductStatus } from "@/domain/catalog";
+import type { ProductType } from "@/domain/fulfillment";
 import { isUuid } from "@/domain/ids";
 import { toInventoryItem } from "@/domain/inventory-view";
 import { changedProductFields, diffProductEconomics, type ProductEditableFields } from "@/domain/product-audit";
@@ -20,6 +21,10 @@ import {
 import { auditInsert, toAuditRow, type AuditActor } from "@/server/services/audit";
 import { adjustAvailableStock } from "@/server/services/inventory/stock";
 import { resolveTaxonomy } from "./taxonomy";
+
+/** La columna antigua `products.collection_id` se mantiene con la primera colección (compatibilidad); la fuente de verdad es `product_collections`. */
+const firstCollection = (ids: readonly string[]) => ids[0] ?? null;
+const collectionKey = (ids: readonly string[]) => [...ids].sort().join(",");
 
 /**
  * ADMINISTRACIÓN DE PRODUCTOS — contiene el COSTO (información interna).
@@ -48,8 +53,11 @@ export type AdminProduct = {
   cost: number | null;
   categoryId: string | null;
   categoryName: string | null;
-  collectionId: string | null;
-  collectionName: string | null;
+  /** Colecciones del producto (puede estar en varias). */
+  collections: { id: string; name: string }[];
+  productType: ProductType;
+  /** Tiene un archivo digital activo (solo importa en productos DIGITALES). */
+  hasDigitalAsset: boolean;
   /** Fila de inventario del producto "simple" (sin variantes). `null` = no tiene. */
   inventoryId: string | null;
   availableStock: number | null;
@@ -76,8 +84,9 @@ const adminProductColumns = {
   cost: products.cost,
   categoryId: products.categoryId,
   categoryName: categories.name,
-  collectionId: products.collectionId,
-  collectionName: collections.name,
+  collections: sql<{ id: string; name: string }[]>`coalesce((select json_agg(json_build_object('id', co.id, 'name', co.name) order by co.name) from product_collections pc join collections co on co.id = pc.collection_id where pc.product_id = ${products.id}), '[]'::json)`,
+  productType: products.productType,
+  hasDigitalAsset: sql<boolean>`exists (select 1 from digital_assets da where da.product_id = ${products.id} and da.is_active)`,
   inventoryId: inventory.id,
   availableStock: inventory.availableStock,
   reservedStock: inventory.reservedStock,
@@ -92,7 +101,6 @@ function baseSelect(db: Database) {
     .select(adminProductColumns)
     .from(products)
     .leftJoin(categories, eq(categories.id, products.categoryId))
-    .leftJoin(collections, eq(collections.id, products.collectionId))
     .leftJoin(inventory, and(eq(inventory.productId, products.id), isNull(inventory.variantId)));
 }
 
@@ -232,7 +240,7 @@ export type SaveProductResult =
   | { ok: true; id: string }
   | {
       ok: false;
-      code: "slug_taken" | "sku_taken" | "not_found" | "stock_conflict" | "invalid_taxonomy";
+      code: "slug_taken" | "sku_taken" | "not_found" | "stock_conflict" | "invalid_taxonomy" | "type_locked";
       message: string;
       errors?: Record<string, string>;
       currentStock?: number;
@@ -279,7 +287,8 @@ export async function createProduct(
   images: readonly ImageRef[] = [],
   presetId?: string,
 ): Promise<SaveProductResult> {
-  const status: ProductStatus = input.status ?? "DRAFT";
+  // Un producto digital nace Oculto: todavía no tiene su PDF (se publica después de subirlo).
+  const status: ProductStatus = input.productType === "DIGITAL" ? "DRAFT" : (input.status ?? "DRAFT");
   const clash = await findUniqueClash(db, input.slug, input.sku);
   if (clash) return clash;
 
@@ -300,19 +309,21 @@ export async function createProduct(
       cost: input.cost,
       currency: input.currency,
       categoryId: taxonomy.categoryId,
-      collectionId: taxonomy.collectionId,
+      collectionId: firstCollection(taxonomy.collectionIds),
+      productType: input.productType,
       status,
       isFeatured: input.isFeatured,
       isNew: input.isNew,
       isLimitedEdition: input.isLimitedEdition,
     }),
-    db.insert(inventory).values({
-      productId: id,
-      variantId: null,
-      availableStock: input.availableStock,
-      lowStockThreshold: input.lowStockThreshold,
-    }),
   ];
+  // Un producto DIGITAL no tiene inventario (se entrega un archivo, no una unidad física).
+  if (input.productType === "PHYSICAL") {
+    statements.push(db.insert(inventory).values({ productId: id, variantId: null, availableStock: input.availableStock, lowStockThreshold: input.lowStockThreshold }));
+  }
+  if (taxonomy.collectionIds.length > 0) {
+    statements.push(db.insert(productCollections).values(taxonomy.collectionIds.map((collectionId) => ({ productId: id, collectionId }))));
+  }
   if (images.length > 0) {
     statements.push(
       db.insert(productImages).values(
@@ -339,7 +350,9 @@ export async function createProduct(
           price: input.price,
           cost: input.cost,
           currency: input.currency,
-          availableStock: input.availableStock,
+          availableStock: input.productType === "PHYSICAL" ? input.availableStock : null,
+          productType: input.productType,
+          collections: taxonomy.collectionIds.length,
           status,
           images: images.length,
         },
@@ -386,10 +399,17 @@ export async function updateProduct(
   const taxonomy = await resolveTaxonomy(db, input);
   if (!taxonomy.ok) return { ok: false, code: "invalid_taxonomy", message: "Revisá la categoría y la colección.", errors: taxonomy.errors };
 
+  // El tipo (físico/digital) solo se cambia mientras el producto no tenga historial de ventas, y un digital no puede tener variantes.
+  if (input.productType !== current.productType) {
+    const blockers = await getDeleteBlockers(db, id);
+    if (blockers.length > 0) return { ok: false, code: "type_locked", message: "No se puede cambiar el tipo: el producto ya tiene pedidos. Creá otro producto si necesitás la otra versión.", errors: { productType: "El producto ya tiene pedidos: el tipo no se puede cambiar." } };
+    if (input.productType === "DIGITAL" && current.variantCount > 0) return { ok: false, code: "type_locked", message: "Un producto digital no puede tener variantes. Eliminá las variantes primero.", errors: { productType: "Quitá las variantes antes de hacerlo digital." } };
+  }
+  const physical = input.productType === "PHYSICAL";
   const hasVariants = current.variantCount > 0;
   const currentStock = current.availableStock ?? 0;
   const expected = expectedAvailableStock ?? currentStock;
-  const adminChangedStock = !hasVariants && input.availableStock !== expected;
+  const adminChangedStock = physical && !hasVariants && input.availableStock !== expected;
 
   const stockConflict = (stock: number): SaveProductResult => ({
     ok: false,
@@ -402,14 +422,14 @@ export async function updateProduct(
   const finalStock = adminChangedStock ? input.availableStock : currentStock;
   const before: ProductEditableFields = {
     name: current.name, slug: current.slug, sku: current.sku, shortDescription: current.shortDescription,
-    description: current.description, categoryId: current.categoryId, collectionId: current.collectionId,
+    description: current.description, categoryId: current.categoryId, collectionIds: collectionKey(current.collections.map((c) => c.id)), productType: current.productType,
     isFeatured: current.isFeatured, isNew: current.isNew, isLimitedEdition: current.isLimitedEdition,
     price: current.price, cost: current.cost, currency: current.currency,
     lowStockThreshold: current.lowStockThreshold ?? 0, availableStock: currentStock,
   };
   const after: ProductEditableFields = {
     name: input.name, slug: input.slug, sku: input.sku, shortDescription: input.shortDescription,
-    description: input.description, categoryId: taxonomy.categoryId, collectionId: taxonomy.collectionId,
+    description: input.description, categoryId: taxonomy.categoryId, collectionIds: collectionKey(taxonomy.collectionIds), productType: input.productType,
     isFeatured: input.isFeatured, isNew: input.isNew, isLimitedEdition: input.isLimitedEdition,
     price: input.price, cost: input.cost, currency: input.currency,
     lowStockThreshold: input.lowStockThreshold, availableStock: finalStock,
@@ -453,17 +473,23 @@ export async function updateProduct(
         cost: input.cost,
         currency: input.currency,
         categoryId: taxonomy.categoryId,
-        collectionId: taxonomy.collectionId,
+        collectionId: firstCollection(taxonomy.collectionIds),
+        productType: input.productType,
         isFeatured: input.isFeatured,
         isNew: input.isNew,
         isLimitedEdition: input.isLimitedEdition,
       })
       .where(eq(products.id, id)),
-    // El umbral de "stock bajo" es del producto: aplica a su fila simple y a todas sus variantes.
-    db.update(inventory).set({ lowStockThreshold: input.lowStockThreshold }).where(eq(inventory.productId, id)),
+    // Colecciones: se reemplaza el conjunto completo en el mismo lote.
+    db.delete(productCollections).where(eq(productCollections.productId, id)),
   ];
+  if (taxonomy.collectionIds.length > 0) {
+    statements.push(db.insert(productCollections).values(taxonomy.collectionIds.map((collectionId) => ({ productId: id, collectionId }))));
+  }
+  // El umbral de "stock bajo" es del producto: aplica a su fila simple y a todas sus variantes (solo productos físicos).
+  if (physical) statements.push(db.update(inventory).set({ lowStockThreshold: input.lowStockThreshold }).where(eq(inventory.productId, id)));
 
-  if (!current.inventoryId && !hasVariants) {
+  if (physical && !current.inventoryId && !hasVariants) {
     statements.push(
       db.insert(inventory).values({ productId: id, variantId: null, availableStock: finalStock, lowStockThreshold: input.lowStockThreshold }),
     );
@@ -513,6 +539,11 @@ export async function applyProductAction(db: Database, id: string, action: Produ
   const rule = PRODUCT_ACTION_RULES[action];
   if (!canApplyAction(action, current.status)) {
     return { ok: false, code: "invalid_transition", message: `No se puede “${rule.label.toLowerCase()}” un producto que está ${current.status === "ACTIVE" ? "activo" : current.status === "DRAFT" ? "oculto" : "archivado"}.` };
+  }
+
+  // Un producto digital no se publica sin su archivo: se vendería algo que no se puede entregar.
+  if (rule.to === "ACTIVE" && current.productType === "DIGITAL" && !current.hasDigitalAsset) {
+    return { ok: false, code: "conflict", message: "Este producto es digital: subí el PDF antes de publicarlo." };
   }
 
   const row = toAuditRow(actor, {
@@ -573,7 +604,7 @@ export async function getDeleteInfo(db: Database, id: string): Promise<DeleteInf
 }
 
 export type DeleteResult =
-  | { ok: true; storedImages: { url: string; storageKey: string }[] }
+  | { ok: true; storedImages: { url: string; storageKey: string }[]; digitalKeys: string[] }
   | { ok: false; code: "not_found" | "blocked"; message: string; blockers?: DeleteBlocker[] };
 
 /**
@@ -590,6 +621,9 @@ export async function deleteProduct(db: Database, id: string, actor: AuditActor)
     .select({ url: productImages.url, storageKey: productImages.storageKey })
     .from(productImages)
     .where(and(eq(productImages.productId, id), sql`${productImages.storageKey} is not null`));
+
+  // Archivos digitales (almacenamiento privado): un producto sin pedidos no entregó nada, así que sus archivos se borran con él.
+  const assets = await db.select({ key: digitalAssets.storageKey }).from(digitalAssets).where(eq(digitalAssets.productId, id));
 
   const row = toAuditRow(actor, { action: "product.deleted", entityType: "product", entityId: id, metadata: {} });
   const result = await db.execute(sql`
@@ -613,5 +647,5 @@ export async function deleteProduct(db: Database, id: string, actor: AuditActor)
     const blockers = await getDeleteBlockers(db, id);
     return { ok: false, code: "blocked", blockers, message: "Este producto tiene historial de ventas: no se puede eliminar, pero sí archivar." };
   }
-  return { ok: true, storedImages: stored.flatMap((s) => (s.storageKey ? [{ url: s.url, storageKey: s.storageKey }] : [])) };
+  return { ok: true, storedImages: stored.flatMap((s) => (s.storageKey ? [{ url: s.url, storageKey: s.storageKey }] : [])), digitalKeys: assets.map((a) => a.key) };
 }

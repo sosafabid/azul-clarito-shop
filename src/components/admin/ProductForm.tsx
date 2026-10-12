@@ -22,7 +22,8 @@ export type ProductFormValues = {
   lowStockThreshold: string;
   categoryId: string;
   newCategory: string;
-  collectionId: string;
+  collectionIds: string[];
+  productType: string;
   newCollection: string;
   imageUrls: string;
   isFeatured: boolean;
@@ -147,7 +148,11 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
               className={inputClass}
             />
           </Field>
-          {mode === "create" && !caps.publish ? (
+          {mode === "create" && values.productType === "DIGITAL" ? (
+            <p className="self-end rounded-xl bg-celeste/35 px-4 py-3 text-sm text-ink/80">
+              Un producto digital nace <strong>Oculto</strong>: subí su PDF en la ficha y recién ahí podés publicarlo.
+            </p>
+          ) : mode === "create" && !caps.publish ? (
             <p className="self-end rounded-xl bg-celeste/35 px-4 py-3 text-sm text-ink/80">
               El producto nuevo queda <strong>Oculto</strong> hasta que una persona SUPER_ADMIN lo publique.
             </p>
@@ -160,6 +165,24 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
             </Field>
           ) : null}
         </div>
+        <fieldset>
+          <legend className={labelClass}>Tipo de producto *</legend>
+          <div className="flex flex-wrap gap-x-8 gap-y-2">
+            {(
+              [
+                ["PHYSICAL", "Físico (inventario y envío)"],
+                ["DIGITAL", "Digital (PDF para descargar, sin inventario ni envío)"],
+              ] as const
+            ).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 font-semibold text-navy">
+                <input type="radio" name="productType" value={value} checked={values.productType === value} onChange={(e) => set("productType", e.target.value)} className="size-5 accent-navy" />
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-ink/60">No se deduce de la categoría: un libro puede ser físico o digital. Se puede cambiar solo mientras el producto no tenga pedidos.</p>
+          {errors.productType && <p role="alert" className="mt-1 text-xs font-semibold text-coral">{errors.productType}</p>}
+        </fieldset>
         <Field label="Descripción corta" error={errors.shortDescription}>
           <input name="shortDescription" value={values.shortDescription} onChange={(e) => set("shortDescription", e.target.value)} className={inputClass} />
         </Field>
@@ -198,17 +221,27 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
           <Field label="…o crear una categoría nueva" error={errors.newCategory} hint="Si escribís un nombre, se usa en lugar de la lista.">
             <input name="newCategory" value={values.newCategory} onChange={(e) => set("newCategory", e.target.value)} className={inputClass} maxLength={60} />
           </Field>
-          <Field label="Colección" error={errors.collectionId}>
-            <select name="collectionId" value={values.collectionId} onChange={(e) => set("collectionId", e.target.value)} className={inputClass}>
-              <option value="">Sin colección</option>
+          <fieldset className="sm:col-span-1">
+            <legend className={labelClass}>Colecciones (una o varias)</legend>
+            {collections.length === 0 && <p className="text-xs text-ink/60">Todavía no hay colecciones: creá la primera abajo.</p>}
+            <div className="flex flex-wrap gap-x-5 gap-y-2">
               {collections.map((c) => (
-                <option key={c.id} value={c.id}>
+                <label key={c.id} className="flex items-center gap-2 text-sm font-semibold text-navy">
+                  <input
+                    type="checkbox"
+                    name="collectionIds"
+                    value={c.id}
+                    checked={values.collectionIds.includes(c.id)}
+                    onChange={(e) => set("collectionIds", e.target.checked ? [...values.collectionIds, c.id] : values.collectionIds.filter((id) => id !== c.id))}
+                    className="size-5 accent-navy"
+                  />
                   {c.name}
-                </option>
+                </label>
               ))}
-            </select>
-          </Field>
-          <Field label="…o crear una colección nueva" error={errors.newCollection} hint="Si escribís un nombre, se usa en lugar de la lista.">
+            </div>
+            {errors.collectionIds && <p role="alert" className="mt-1 text-xs font-semibold text-coral">{errors.collectionIds}</p>}
+          </fieldset>
+          <Field label="…o sumar una colección nueva" error={errors.newCollection} hint="Se agrega a las que marcaste.">
             <input name="newCollection" value={values.newCollection} onChange={(e) => set("newCollection", e.target.value)} className={inputClass} maxLength={60} />
           </Field>
         </div>
@@ -309,6 +342,13 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
         </section>
       )}
 
+      {values.productType === "DIGITAL" ? (
+        <section className="space-y-3 rounded-3xl border border-celeste bg-paper p-5 sm:p-7">
+          <h2 className="text-xl font-bold">Inventario y envío</h2>
+          <Notice>Los productos digitales no usan inventario ni costo de envío: se entregan con un enlace de descarga cuando el pago está confirmado.</Notice>
+          <input type="hidden" name="lowStockThreshold" value="0" />
+        </section>
+      ) : (
       <section className="space-y-5 rounded-3xl border border-celeste bg-paper p-5 sm:p-7">
         <h2 className="text-xl font-bold">Inventario</h2>
         {hasVariants ? (
@@ -353,6 +393,7 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
           </dl>
         )}
       </section>
+      )}
 
       <button
         type="submit"

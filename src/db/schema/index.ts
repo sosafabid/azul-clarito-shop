@@ -12,6 +12,7 @@ export * from "./catalog";
 export * from "./inventory";
 export * from "./shipping";
 export * from "./orders";
+export * from "./digital";
 export * from "./payments";
 export * from "./payment-events";
 export * from "./audit";

@@ -48,7 +48,7 @@ export async function getAdminOrder(db: Database, id: string) {
   if (!order) return null;
   const [items, paymentRows, events, reservations, notifications] = await Promise.all([
     db
-      .select({ id: orderItems.id, name: orderItems.nameSnapshot, sku: orderItems.skuSnapshot, quantity: orderItems.quantity, unitPrice: orderItems.unitPriceSnapshot, lineTotal: orderItems.lineTotal })
+      .select({ id: orderItems.id, name: orderItems.nameSnapshot, sku: orderItems.skuSnapshot, fulfillment: orderItems.fulfillmentType, quantity: orderItems.quantity, unitPrice: orderItems.unitPriceSnapshot, lineTotal: orderItems.lineTotal })
       .from(orderItems)
       .where(eq(orderItems.orderId, id))
       .orderBy(asc(orderItems.createdAt)),

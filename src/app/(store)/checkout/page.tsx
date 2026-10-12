@@ -68,6 +68,9 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const method = shipping.method;
   // Un país distinto de Costa Rica (request manipulada) NUNCA recibe envío: se le explica en vez de pedirle la dirección de nuevo.
   const countryProblem = countryRejected || shipping.state === "unsupported_country";
+  // Pedido solo digital: sin envío (₡0) ni dirección de entrega. Solo se pide una dirección de FACTURACIÓN (la pasarela la exige).
+  const digitalOnly = !shipping.required && cart.lines.length > 0;
+  const hasDigital = cart.lines.some((line) => line.fulfillment === "DIGITAL");
 
   return (
     <section className="bg-paper py-10 sm:py-14">
@@ -85,6 +88,12 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_24rem] lg:items-start">
           <div className="space-y-6">
+          {digitalOnly ? (
+            <div className="rounded-3xl border border-celeste p-5 sm:p-6">
+              <h2 className="font-display text-xl font-bold text-navy">Entrega digital</h2>
+              <p className="mt-2 text-sm leading-relaxed text-ink/75">Tu compra es 100% digital: no hay envío ni costo de envío. Cuando el pago se confirme vas a poder descargar tu PDF desde la página de tu pedido y te lo enviamos también por correo.</p>
+            </div>
+          ) : (
           <form method="get" action={routes.checkout} className="space-y-6">
             <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
               <legend className="px-2 font-display text-xl font-bold text-navy">¿A dónde lo enviamos?</legend>
@@ -128,14 +137,18 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 </p>
               )}
             </fieldset>
+            {hasDigital && <p className="rounded-2xl bg-aqua/15 p-4 text-sm text-navy">Los productos digitales de tu carrito no pagan envío: la tarifa se calcula solo con los productos físicos.</p>}
             <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">Actualizar resumen</button>
           </form>
+          )}
           {pending ? (
             <PendingOrderPanel orderNumber={pending.orderNumber} total={money(pending.total)} />
           ) : !paymentsEnabled ? (
             <Notice tone="warning">El pago en línea no está disponible por el momento. Escribinos y te ayudamos a completar tu compra.</Notice>
+          ) : totals.canProceed && totals.total !== null && digitalOnly ? (
+            <CheckoutForm mode="billing" province="" city="" postalCode="" seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
           ) : totals.canProceed && totals.total !== null && destination ? (
-            <CheckoutForm province={destination.province ?? ""} city={destination.city ?? ""} postalCode={destination.postalCode ?? ""} seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
+            <CheckoutForm mode="shipping" province={destination.province ?? ""} city={destination.city ?? ""} postalCode={destination.postalCode ?? ""} seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
           ) : null}
           </div>
 
@@ -148,6 +161,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                   <div className="min-w-0 flex-1 text-sm">
                     <p className="font-display font-bold text-navy">{line.name}</p>
                     {line.variantLabel && <p className="text-ink/70">{line.variantLabel}</p>}
+                    {line.fulfillment === "DIGITAL" && <p className="text-ink/70">Digital · PDF · sin envío</p>}
                     <p className="text-ink/60">{line.quantity} × {formatMoney(line.unitPrice, toCurrency(line.currency))}</p>
                     {line.status !== "ok" && <p className="font-semibold text-coral">{line.status === "unavailable" ? "Ya no está disponible" : "Stock insuficiente"}</p>}
                   </div>
@@ -163,9 +177,10 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 <dd className="font-semibold">{tax.applied ? money(tax.amount) : "No aplican"}</dd>
               </div>
               <div className={row}>
-                <dt>{method?.name ?? "Envío"}</dt>
+                <dt>{digitalOnly ? "Envío" : (method?.name ?? "Envío")}</dt>
                 <dd className="max-w-[12rem] text-right font-semibold">
-                  {countryProblem ? COUNTRY_ONLY_MESSAGE
+                  {digitalOnly ? `${money(0)} · entrega digital`
+                    : countryProblem ? COUNTRY_ONLY_MESSAGE
                     : !method ? "No hay un método de envío disponible por el momento."
                     : shipping.state === "selected" && shipping.selected ? (shipping.selected.free ? "Gratis" : money(shipping.selected.amount))
                     : shipping.state === "needs_destination" ? "Seleccioná tu dirección para ver el costo del envío"
@@ -176,7 +191,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 <dt className="font-display text-lg font-bold text-navy">Total</dt>
                 <dd className="font-display text-2xl font-bold text-navy">{totals.total !== null ? money(totals.total) : "—"}</dd>
               </div>
-              {totals.total === null && totals.blockers.length === 0 && <p className="text-xs text-ink/60">El total aparece cuando el envío tenga costo para tu destino.</p>}
+              {totals.total === null && totals.blockers.length === 0 && !digitalOnly && <p className="text-xs text-ink/60">El total aparece cuando el envío tenga costo para tu destino.</p>}
             </dl>
 
           </aside>

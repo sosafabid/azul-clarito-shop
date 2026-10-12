@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, count, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import type { Database } from "@/db/client";
-import { cartItems, carts, inventory, productVariants, products } from "@/db/schema";
+import { cartItems, carts, digitalAssets, inventory, productVariants, products } from "@/db/schema";
 import {
   MAX_CART_LINES,
   limitMessage,
@@ -16,6 +16,8 @@ import {
   totalUnits,
   variantLabel,
 } from "@/domain/cart";
+import { DIGITAL_MAX_QUANTITY } from "@/domain/fulfillment";
+import { isDigitalStorageConfigured } from "@/server/services/digital/storage";
 import { isUuid } from "@/domain/ids";
 import { releaseExpiredReservations } from "@/server/services/payments/reconcile";
 import type { CartMutation, CartOwner, CartView, CartLineView } from "./types";
@@ -85,11 +87,18 @@ async function resolvePurchasable(db: Database, productId: string, variantId: st
     return { ok: false, code: "not_found", message: NOT_AVAILABLE };
   }
   const [product] = await db
-    .select({ id: products.id, price: products.price, currency: products.currency, status: products.status })
+    .select({ id: products.id, price: products.price, currency: products.currency, status: products.status, productType: products.productType })
     .from(products)
     .where(eq(products.id, productId))
     .limit(1);
   if (!product || product.status !== "ACTIVE") return { ok: false, code: "not_found", message: NOT_AVAILABLE };
+
+  if (product.productType === "DIGITAL") {
+    // Digital: sin variantes ni inventario. Se puede comprar mientras tenga su archivo activo; una sola copia por pedido.
+    if (variantId !== null) return { ok: false, code: "variant_invalid", message: "Esa opción no existe para este producto." };
+    const [asset] = await db.select({ id: digitalAssets.id }).from(digitalAssets).where(and(eq(digitalAssets.productId, productId), eq(digitalAssets.isActive, true))).limit(1);
+    return { ok: true, item: { productId, variantId: null, unitPrice: product.price, currency: product.currency, available: asset && isDigitalStorageConfigured() ? DIGITAL_MAX_QUANTITY : 0 } };
+  }
 
   const variants = await db
     .select({ id: productVariants.id, price: productVariants.price, isActive: productVariants.isActive })
@@ -225,6 +234,8 @@ export async function getCartView(db: Database, owner: CartOwner): Promise<CartV
       name: products.name,
       productSku: products.sku,
       status: products.status,
+      productType: products.productType,
+      hasAsset: sql<boolean>`exists (select 1 from digital_assets da where da.product_id = ${products.id} and da.is_active)`,
       price: products.price,
       currency: products.currency,
       variantSku: productVariants.sku,
@@ -243,8 +254,12 @@ export async function getCartView(db: Database, owner: CartOwner): Promise<CartV
     .orderBy(asc(cartItems.createdAt), asc(cartItems.id));
 
   const lines: CartLineView[] = rows.map((row) => {
+    const digital = row.productType === "DIGITAL";
+    // Un libro digital no usa inventario: está disponible mientras tenga su archivo activo, y se lleva de a una copia.
+    // Sin el almacén privado configurado no se podría entregar el PDF: tampoco se vende.
+    const available = digital ? (row.hasAsset && isDigitalStorageConfigured() ? DIGITAL_MAX_QUANTITY : 0) : row.available;
     const purchasable = row.status === "ACTIVE" && (row.variantId === null || row.variantActive === true);
-    const status = lineStatus({ purchasable, available: row.available, quantity: row.quantity });
+    const status = lineStatus({ purchasable, available, quantity: row.quantity });
     const unitPrice = row.variantPrice ?? row.price;
     const label = row.variantId ? variantLabel({ name: row.variantName, options: row.variantOptions, sku: row.variantSku }) : null;
     return {
@@ -262,8 +277,9 @@ export async function getCartView(db: Database, owner: CartOwner): Promise<CartV
       lineTotal: lineTotal(unitPrice, row.quantity),
       currency: row.currency,
       status,
-      maxQuantity: purchasable ? maxPurchasable(row.available) : 0,
-      availableNow: status === "insufficient" ? row.available : null,
+      fulfillment: row.productType,
+      maxQuantity: purchasable ? maxPurchasable(available) : 0,
+      availableNow: status === "insufficient" ? available : null,
     };
   });
 
@@ -310,10 +326,11 @@ export async function mergeGuestCart(db: Database, userId: string, guestTokenHas
   const productIds = [...new Set([...guestItems, ...userItems].map((item) => item.productId))];
   const [stockRows, productRows] = await Promise.all([
     db.select({ productId: inventory.productId, variantId: inventory.variantId, available: inventory.availableStock }).from(inventory).where(inArray(inventory.productId, productIds)),
-    db.select({ id: products.id, currency: products.currency }).from(products).where(inArray(products.id, productIds)),
+    db.select({ id: products.id, currency: products.currency, productType: products.productType }).from(products).where(inArray(products.id, productIds)),
   ]);
   const available = new Map(stockRows.map((row) => [lineKey(row.productId, row.variantId), row.available]));
   const currencyOf = new Map(productRows.map((row) => [row.id, row.currency]));
+  const digitalIds = new Set(productRows.filter((row) => row.productType === "DIGITAL").map((row) => row.id));
 
   // Un pedido se paga en una sola moneda: se conserva la de la cuenta (o la de la primera línea de la invitada).
   const currency = currencyOf.get((userItems[0] ?? guestItems[0]).productId);
@@ -327,7 +344,7 @@ export async function mergeGuestCart(db: Database, userId: string, guestTokenHas
       continue;
     }
     const key = lineKey(item.productId, item.variantId);
-    const stock = available.get(key) ?? 0;
+    const stock = digitalIds.has(item.productId) ? DIGITAL_MAX_QUANTITY : (available.get(key) ?? 0);
     const existing = merged.get(key);
     if (existing) existing.quantity = mergedQuantity(item.quantity, existing.quantity, stock);
     else merged.set(key, { ...item, quantity: mergedQuantity(item.quantity, 0, stock) });

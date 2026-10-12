@@ -13,6 +13,7 @@ export function ProductCard({ product }: { product: PublicProductListItem }) {
         <ProductImage src={product.imageUrl} alt={product.imageAlt ?? product.name} className="transition-transform duration-300 motion-safe:group-hover:scale-[1.02]" />
         <div className="flex flex-1 flex-col gap-2 p-5 pb-3">
           <div className="flex flex-wrap items-center gap-2">
+            {product.productType === "DIGITAL" && <span className="rounded-full bg-aqua/30 px-2.5 py-0.5 font-display text-xs font-bold text-navy">Digital · PDF</span>}
             {product.isNew && <span className="rounded-full bg-navy px-2.5 py-0.5 font-display text-xs font-bold text-paper">Nuevo</span>}
             {product.isLimitedEdition && <span className="rounded-full bg-sand px-2.5 py-0.5 font-display text-xs font-bold text-navy">Edición limitada</span>}
           </div>

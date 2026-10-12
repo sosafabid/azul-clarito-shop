@@ -5,6 +5,8 @@ import { orderItems, orders, payments } from "@/db/schema";
 import { toCurrency } from "@/domain/money";
 import { serverConfig } from "@/config/server";
 import { routes } from "@/config/routes";
+import { DOWNLOAD_LINK_RULES } from "@/domain/fulfillment";
+import { orderHasDigital, prepareEmailDownloads } from "@/server/services/digital/delivery";
 import { getEmailService } from "@/server/services/email/service";
 import type { OrderSummaryEmailData } from "@/server/services/email/events";
 
@@ -16,7 +18,7 @@ import type { OrderSummaryEmailData } from "@/server/services/email/events";
  * Si Resend falla, la fila queda en FAILED (el pago ya está confirmado, el correo NO lo revierte) y la conciliación lo reintenta
  * hasta 5 veces. Un envío que se quedó "en vuelo" (PENDING hace más de 10 minutos) también puede reclamarse de nuevo.
  */
-export type OrderEmailEvent = "order_received" | "payment_confirmed" | "payment_failed" | "order_cancelled" | "admin_new_order" | "admin_payment_review";
+export type OrderEmailEvent = "order_received" | "payment_confirmed" | "payment_failed" | "order_cancelled" | "admin_new_order" | "admin_payment_review" | "digital_delivery" | "digital_recovery";
 export const MAX_EMAIL_ATTEMPTS = 5;
 
 async function claim(db: Database, orderId: string, key: string): Promise<boolean> {
@@ -74,6 +76,8 @@ async function loadOrder(db: Database, orderId: string): Promise<LoadedOrder | n
       taxTotal: order.taxTotal,
       taxIncluded: order.pricingSnapshot?.tax.included ?? false,
       destination: [address.district, address.city, address.stateProvince].filter(Boolean).join(", "),
+      requiresShipping: order.requiresShipping,
+      hasDigital: items.some((item) => item.fulfillmentType === "DIGITAL"),
     },
   };
 }
@@ -120,6 +124,24 @@ export async function sendOrderEmail(
         to,
         data: { ...order.summary, customerEmail: order.email, adminUrl: `${serverConfig.appBaseUrl}${routes.adminOrder(input.orderId)}`, transactionId: order.transactionId, reason: order.reviewReason ?? "Cobro aprobado en un pedido que no estaba pendiente." },
       });
+    } else if (input.event === "digital_delivery" || input.event === "digital_recovery") {
+      // Los enlaces se crean AHORA (y solo si el pedido está pagado): nunca viajan guardados en claro. Si el envío se reintenta, se crean otros.
+      const purpose = input.event === "digital_delivery" ? "EMAIL" : "RECOVERY";
+      const prepared = await prepareEmailDownloads(db, input.orderId, purpose);
+      if (prepared.length === 0) {
+        await finish(db, input.orderId, key, "no_downloads_available");
+        return "failed";
+      }
+      result = await service.send({
+        event: input.event,
+        to: order.email,
+        data: {
+          ...order.summary,
+          statusUrl,
+          expiresHours: Math.round(DOWNLOAD_LINK_RULES[purpose].ttlMinutes / 60),
+          downloads: prepared.map((d) => ({ name: d.name, url: `${serverConfig.appBaseUrl}${routes.download(d.token)}` })),
+        },
+      });
     } else {
       result = await service.send({ event: input.event, to: order.email, data: { ...order.summary, statusUrl } });
     }
@@ -149,4 +171,18 @@ export async function retryFailedEmails(db: Database, limit = 20): Promise<numbe
     if ((await sendOrderEmail(db, { orderId: row.order_id, event: base, key: row.event })) === "sent") sent += 1;
   }
   return sent;
+}
+
+/**
+ * Entrega de libros digitales después de un pago CONFIRMADO por el servidor. Idempotente: el evento `digital_delivery` se reclama una
+ * sola vez por pedido (un retorno repetido, la conciliación o un reintento no mandan enlaces dos veces). Si el pedido no tiene libros
+ * digitales, no hace nada.
+ */
+export async function sendDigitalDelivery(db: Database, orderId: string, token?: string | null): Promise<"sent" | "skipped" | "failed"> {
+  try {
+    if (!(await orderHasDigital(db, orderId))) return "skipped";
+  } catch {
+    return "failed";
+  }
+  return sendOrderEmail(db, { orderId, event: "digital_delivery", token });
 }

@@ -79,7 +79,7 @@ describe("frontera pública / privada", () => {
 describe("autorización en el servidor", () => {
   it("cada Server Action exige sesión/permiso ANTES de tocar la base de datos", () => {
     // login / registro / logout, recuperación de cuenta, el carrito y el checkout son públicos por naturaleza (se prueban aparte, abajo).
-    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts") && !rel(p).endsWith("/actions/recovery.ts") && !rel(p).endsWith("/actions/staff-invitations.ts") && !rel(p).endsWith("/actions/checkout.ts"));
+    const files = all.filter((p) => rel(p).startsWith("src/server/actions/") && !rel(p).endsWith("/actions/auth.ts") && !rel(p).endsWith("/actions/cart.ts") && !rel(p).endsWith("/actions/recovery.ts") && !rel(p).endsWith("/actions/staff-invitations.ts") && !rel(p).endsWith("/actions/checkout.ts") && !rel(p).endsWith("/actions/downloads.ts"));
     expect(files.length).toBeGreaterThanOrEqual(4);
 
     for (const file of files) {
@@ -115,7 +115,13 @@ describe("autorización en el servidor", () => {
 
   it("las ÚNICAS rutas API son: subida de imágenes, retorno de Tilopay y conciliación programada", () => {
     const handlers = all.filter((p) => /\/route\.ts$/.test(rel(p)));
-    expect(handlers.map(rel).sort()).toEqual(["src/app/api/admin/product-images/route.ts", "src/app/api/cron/payments-reconcile/route.ts", "src/app/api/payments/tilopay/return/route.ts"]);
+    expect(handlers.map(rel).sort()).toEqual([
+      "src/app/api/admin/digital-assets/upload/route.ts",
+      "src/app/api/admin/product-images/route.ts",
+      "src/app/api/cron/payments-reconcile/route.ts",
+      "src/app/api/downloads/[token]/route.ts",
+      "src/app/api/payments/tilopay/return/route.ts",
+    ]);
     const source = stripComments(read(join(SRC, "app/api/admin/product-images/route.ts")));
     // cada método (POST y DELETE) pasa por authorize() antes de leer el cuerpo o tocar el almacenamiento
     for (const method of ["POST", "DELETE"]) {
@@ -132,9 +138,14 @@ describe("autorización en el servidor", () => {
   it("el token de Blob solo lo lee el servidor: nunca el código del navegador ni una variable NEXT_PUBLIC", () => {
     const readers = all.filter((p) => /process\.env\.BLOB_READ_WRITE_TOKEN/.test(stripComments(read(p)))).map(rel);
     expect(readers.filter((f) => f.startsWith("src/") && !f.endsWith(".test.ts"))).toEqual(["src/server/services/images/storage.ts"]);
+    // el token del almacén PRIVADO de PDF: solo su servicio lo lee, y NUNCA se cae al token público de imágenes
+    const digitalReaders = all.filter((p) => /process\.env\.DIGITAL_BLOB_READ_WRITE_TOKEN/.test(stripComments(read(p)))).map(rel);
+    expect(digitalReaders.filter((f) => f.startsWith("src/") && !f.endsWith(".test.ts"))).toEqual(["src/server/services/digital/storage.ts"]);
+    expect(stripComments(read(join(SRC, "server/services/digital/storage.ts")))).not.toMatch(/process\.env\.BLOB_READ_WRITE_TOKEN/);
     expect(all.some((p) => /NEXT_PUBLIC_.*BLOB/.test(read(p)))).toBe(false);
     const clientFiles = all.filter((p) => rel(p).startsWith("src/") && /^\s*["']use client["']/.test(read(p)));
-    for (const file of clientFiles) expect(read(file), rel(file)).not.toMatch(/@vercel\/blob|server\/services\/images/);
+    // Único permiso para el navegador: `@vercel/blob/client` (sube con un permiso de un solo uso emitido por nuestra ruta; no trae ningún token).
+    for (const file of clientFiles) expect(read(file), rel(file)).not.toMatch(/@vercel\/blob(?!\/client)|server\/services\/(images|digital)/);
   });
 
   it("borrar un archivo de Blob siempre pasa por la comprobación de que ya nada lo usa (galería y pedidos)", () => {
@@ -142,7 +153,62 @@ describe("autorización en el servidor", () => {
     expect(storage).toMatch(/imageUrlSnapshot/);
     expect(storage).toMatch(/productImages\.url/);
     const callers = all.filter((p) => rel(p).startsWith("src/") && /\bdel\(/.test(stripComments(read(p))) && /@vercel\/blob/.test(read(p))).map(rel);
-    expect(callers).toEqual(["src/server/services/images/storage.ts"]);
+    expect(callers).toEqual(["src/server/services/digital/storage.ts", "src/server/services/images/storage.ts"]);
+  });
+
+  it("los PDF digitales nunca tienen URL pública: se guardan con acceso privado y solo salen por la ruta de descarga", () => {
+    const sources = all.filter((p) => rel(p).startsWith("src/") && !rel(p).endsWith(".test.ts"));
+    // ningún put/upload/get de PDF con acceso público
+    const digitalFiles = sources.filter((p) => /services\/digital\/|DigitalAssetManager|digital-assets/.test(rel(p)));
+    expect(digitalFiles.length).toBeGreaterThanOrEqual(4);
+    for (const file of digitalFiles) expect(stripComments(read(file)), rel(file)).not.toMatch(/access:\s*["']public["']/);
+    expect(stripComments(read(join(SRC, "server/services/digital/storage.ts")))).toMatch(/access:\s*"private"/);
+    expect(stripComments(read(join(SRC, "components/admin/DigitalAssetManager.tsx")))).toMatch(/access:\s*"private"/);
+    // la clave de almacenamiento y la URL del blob no viajan a páginas ni al navegador
+    for (const file of sources.filter((p) => /\.tsx$/.test(p) && !rel(p).includes("/api/"))) expect(read(file), rel(file)).not.toMatch(/storageKey.*digital|digitalAssets\.storageKey/);
+  });
+
+  it("la descarga digital verifica el pago en la base en CADA petición y nunca confía en la URL de éxito", () => {
+    const route = stripComments(read(join(SRC, "app/api/downloads/[token]/route.ts")));
+    expect(route).toMatch(/claimDownloadByToken\(/);
+    expect(route).toMatch(/claimDownloadForOrderPage\(/);
+    expect(route).toMatch(/allowAttempt\(/);
+    expect(route).toMatch(/no-store/);
+    const delivery = stripComments(read(join(SRC, "server/services/digital/delivery.ts")));
+    expect(delivery).toMatch(/exists \(select 1 from payments p where p\.order_id = o\.id and p\.status = 'PAID'\)/); // pago aprobado
+    expect(delivery).toMatch(/download_count < l\.max_downloads/); // contador atómico con tope
+    expect(delivery).toMatch(/expires_at > now\(\)/);
+    expect(delivery).toMatch(/revoked_at is null/);
+    expect(delivery).toMatch(/token_hash/);
+    expect(delivery).not.toMatch(/token\s*:\s*text|insert into digital_download_links \([^)]*\btoken\b[,)]/); // jamás se guarda el token en claro
+    // la entrega por correo se dispara SOLO desde la confirmación del servidor (verify), no desde páginas ni la URL de retorno
+    const callers = all.filter((p) => rel(p).startsWith("src/") && !rel(p).endsWith(".test.ts") && /sendDigitalDelivery\(/.test(stripComments(read(p)))).map(rel);
+    expect(callers.sort()).toEqual(["src/server/services/orders/notify.ts", "src/server/services/payments/verify.ts"]);
+    expect(stripComments(read(join(SRC, "server/services/payments/verify.ts")))).toMatch(/result\.kind === "paid" && result\.changed && result\.orderChanged\)[\s\S]*sendDigitalDelivery/);
+  });
+
+  it("el permiso de subida del PDF exige mismo origen, sesión y products:write antes de emitir nada", () => {
+    const source = stripComments(read(join(SRC, "app/api/admin/digital-assets/upload/route.ts")));
+    const post = source.slice(source.indexOf("export async function POST"));
+    expect(post.indexOf("await authorize(request)")).toBeGreaterThanOrEqual(0);
+    expect(post.indexOf("await authorize(request)")).toBeLessThan(post.search(/request\.json\(\)|handleUpload\(/));
+    expect(source).toMatch(/getSession\(\)/);
+    expect(source).toMatch(/can\(session\.role, "products:write"\)/);
+    expect(source).toMatch(/allowedContentTypes: \[DIGITAL_FILE\.contentType\]/);
+    expect(source).toMatch(/maximumSizeInBytes/);
+    expect(source).toMatch(/expectedKeyPattern\(/);
+    expect(source).not.toMatch(/onUploadCompleted/);
+  });
+
+  it("«Recuperar mi compra»: respuesta uniforme, límites y envío solo al correo guardado en el pedido", () => {
+    const source = stripComments(read(join(SRC, "server/actions/downloads.ts")));
+    expect(source).toMatch(/recover_by_ip/);
+    expect(source).toMatch(/recover_by_email/);
+    expect(source).toMatch(/findRecoverableOrder\(/);
+    expect(source).toMatch(/MAX_RECOVERY_EMAILS_PER_ORDER_PER_DAY/);
+    // el destinatario sale del pedido (notify.ts → order.email), jamás del formulario
+    expect(source).not.toMatch(/\bto:\s*email\b|sendOrderEmail\([^)]*email\b/);
+    expect(stripComments(read(join(SRC, "server/services/orders/notify.ts")))).toMatch(/to: order\.email/);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   updateProduct,
   type SaveProductResult,
 } from "@/server/services/catalog/admin";
+import { deleteDigitalBlobs } from "@/server/services/digital/storage";
 import { deleteUnusedImages, verifyStoredImages } from "@/server/services/images/storage";
 
 /**
@@ -33,7 +34,7 @@ export type ProductFormState = { errors: Record<string, string>; message?: strin
 
 function failure(result: Extract<SaveProductResult, { ok: false }>): ProductFormState {
   const field =
-    result.code === "slug_taken" ? "slug" : result.code === "sku_taken" ? "sku" : result.code === "stock_conflict" ? "availableStock" : null;
+    result.code === "slug_taken" ? "slug" : result.code === "sku_taken" ? "sku" : result.code === "stock_conflict" ? "availableStock" : result.code === "type_locked" ? "productType" : null;
   return { errors: { ...(field ? { [field]: result.message } : {}), ...(result.errors ?? {}) }, message: result.message };
 }
 
@@ -126,5 +127,6 @@ export async function deleteProductAction(id: string, sku: string, _previous: De
   if (!result.ok) return { message: result.message };
 
   await deleteUnusedImages(getDb(), result.storedImages);
+  await deleteDigitalBlobs(result.digitalKeys);
   redirect(`${routes.adminProducts}?saved=deleted`);
 }

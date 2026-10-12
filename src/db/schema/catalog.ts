@@ -7,12 +7,14 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
+  timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { productStatusEnum } from "./enums";
+import { productStatusEnum, productTypeEnum } from "./enums";
 import { money, primaryId, timestamps } from "./common";
 
 export const categories = pgTable(
@@ -63,7 +65,10 @@ export const products = pgTable(
     cost: money("cost"),
     currency: char("currency", { length: 3 }).notNull().default("CRC"),
     categoryId: uuid("category_id").references(() => categories.id, { onDelete: "set null" }),
+    /** DEPRECADA: la fuente de verdad de las colecciones es `product_collections` (varias por producto). Se conserva solo por compatibilidad. */
     collectionId: uuid("collection_id").references(() => collections.id, { onDelete: "set null" }),
+    /** Tipo EXPLÍCITO: PHYSICAL (inventario + envío) o DIGITAL (PDF privado, sin inventario ni envío). */
+    productType: productTypeEnum("product_type").notNull().default("PHYSICAL"),
     status: productStatusEnum("status").notNull().default("DRAFT"),
     isFeatured: boolean("is_featured").notNull().default(false),
     isNew: boolean("is_new").notNull().default(false),
@@ -77,6 +82,17 @@ export const products = pgTable(
     index("products_category_idx").on(t.categoryId),
     index("products_collection_idx").on(t.collectionId),
   ],
+);
+
+/** Un producto puede pertenecer a varias colecciones (una colección tiene varios productos). */
+export const productCollections = pgTable(
+  "product_collections",
+  {
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+    collectionId: uuid("collection_id").notNull().references(() => collections.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.productId, t.collectionId] }), index("product_collections_collection_idx").on(t.collectionId)],
 );
 
 /**

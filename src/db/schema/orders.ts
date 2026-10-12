@@ -1,4 +1,5 @@
 import {
+  boolean,
   char,
   check,
   index,
@@ -14,7 +15,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { PricingSnapshot } from "@/domain/checkout";
 import type { AddressSnapshot } from "@/types/address";
-import { orderStatusEnum } from "./enums";
+import { orderStatusEnum, productTypeEnum } from "./enums";
 import { users } from "./users";
 import { products, productVariants } from "./catalog";
 import { shippingMethods } from "./shipping";
@@ -56,6 +57,8 @@ export const orders = pgTable(
     shippingMethodId: uuid("shipping_method_id").references(() => shippingMethods.id, {
       onDelete: "set null",
     }),
+    /** false = pedido solo de productos digitales: sin envío ni entrega física (la dirección guardada es la de facturación). */
+    requiresShipping: boolean("requires_shipping").notNull().default(true),
     /** Copia del nombre del método al momento de la compra. */
     shippingMethodName: text("shipping_method_name"),
     /**
@@ -125,6 +128,8 @@ export const orderItems = pgTable(
     productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
     variantId: uuid("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
 
+    /** PHYSICAL o DIGITAL AL MOMENTO de la compra (si el producto cambia después, el pedido no cambia). */
+    fulfillmentType: productTypeEnum("fulfillment_type").notNull().default("PHYSICAL"),
     nameSnapshot: text("name_snapshot").notNull(),
     skuSnapshot: text("sku_snapshot").notNull(),
     variantOptionsSnapshot: jsonb("variant_options_snapshot").$type<Record<string, string>>(),

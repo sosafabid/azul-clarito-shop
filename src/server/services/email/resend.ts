@@ -6,6 +6,7 @@ import {
   renderAdminNewOrder,
   renderAdminPaymentReview,
   renderEmailVerification,
+  renderDigitalDownloads,
   renderOrderCancelled,
   renderOrderReceived,
   renderPasswordChanged,
@@ -48,6 +49,10 @@ export class ResendEmailService implements EmailService {
         return renderPaymentFailed(request.data as never, baseUrl);
       case "order_cancelled":
         return renderOrderCancelled(request.data as never, baseUrl);
+      case "digital_delivery":
+        return renderDigitalDownloads(request.data as never, baseUrl, "delivery");
+      case "digital_recovery":
+        return renderDigitalDownloads(request.data as never, baseUrl, "recovery");
       case "admin_new_order":
         return renderAdminNewOrder(request.data as never, baseUrl);
       case "admin_payment_review":

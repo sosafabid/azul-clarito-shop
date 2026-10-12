@@ -6,7 +6,7 @@ import { toCurrency } from "@/domain/money";
 import { evaluateConsult } from "@/domain/tilopay";
 import { consultOrder, TilopayError } from "@/server/payments/tilopay/client";
 import { readTilopayConfig } from "@/server/payments/tilopay/config";
-import { sendOrderEmail } from "@/server/services/orders/notify";
+import { sendDigitalDelivery, sendOrderEmail } from "@/server/services/orders/notify";
 import { confirmPayment, flagForReview, recordPaymentEvent, rejectPayment, type PaymentSource } from "./lifecycle";
 
 /**
@@ -110,6 +110,8 @@ export async function notifyVerifyResult(db: Database, result: VerifyResult, tok
   if (result.kind === "paid" && result.changed && result.orderChanged) {
     await sendOrderEmail(db, { orderId: result.orderId, event: "payment_confirmed", token });
     await sendOrderEmail(db, { orderId: result.orderId, event: "admin_new_order" });
+    // Libros digitales: los enlaces salen SOLO aquí, cuando el servidor confirmó el pago con Tilopay (no al volver a la página de éxito).
+    await sendDigitalDelivery(db, result.orderId, token);
   } else if (result.kind === "paid" && result.changed) {
     // Cobro aprobado en un pedido que YA no estaba pendiente (cancelado/vencido) o ya pagado: NO se le dice a la clienta "pago confirmado";
     // se avisa al equipo para que lo resuelva (reembolso o reactivación) y el pedido queda marcado para revisión.

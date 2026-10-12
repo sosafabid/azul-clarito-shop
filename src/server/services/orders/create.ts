@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { toOrderAmounts, type PricingSnapshot } from "@/domain/checkout";
+import type { ProductType } from "@/domain/fulfillment";
 import type { CurrencyCode } from "@/domain/money";
 import { formatOrderNumber } from "@/domain/order-number";
 import { RESERVATION_MINUTES } from "@/domain/tilopay";
@@ -26,7 +27,9 @@ import type { AddressSnapshot } from "@/types/address";
  * Los montos (`toOrderAmounts`) salen del snapshot calculado en el servidor, nunca del navegador.
  */
 export type OrderLineInput = {
-  inventoryId: string;
+  /** `null` en las líneas DIGITALES: no tienen inventario, no se reservan. */
+  inventoryId: string | null;
+  fulfillment: ProductType;
   productId: string;
   variantId: string | null;
   name: string;
@@ -44,6 +47,8 @@ export type CreatePendingOrderInput = {
   address: AddressSnapshot;
   notes: string | null;
   snapshot: PricingSnapshot;
+  /** false = pedido solo digital (sin envío). */
+  requiresShipping: boolean;
   currency: CurrencyCode;
   lines: readonly OrderLineInput[];
 };
@@ -63,6 +68,10 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
   const amounts = toOrderAmounts(snapshot);
   const n = input.lines.length;
   if (n === 0) return { ok: false, code: "error" };
+  const physical = input.lines.filter((l) => l.fulfillment === "PHYSICAL");
+  const nPhysical = physical.length;
+  // Coherencia: el pedido exige envío si y solo si tiene al menos una línea física, y las físicas siempre traen inventario.
+  if (input.requiresShipping !== (nPhysical > 0) || physical.some((l) => !l.inventoryId)) return { ok: false, code: "error" };
 
   const orderNumber = await nextOrderNumber(db);
   const orderId = randomUUID();
@@ -71,7 +80,7 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
   const rows = sql.join(
     input.lines.map(
       (l) =>
-        sql`(${l.inventoryId}::uuid, ${l.productId}::uuid, ${l.variantId}::uuid, ${l.unitPrice}::bigint, ${l.quantity}::int, ${l.name}::text, ${l.sku}::text, ${l.imageUrl}::text, ${l.variantOptions ? JSON.stringify(l.variantOptions) : null}::jsonb)`,
+        sql`(${l.inventoryId}::uuid, ${l.fulfillment}::product_type, ${l.productId}::uuid, ${l.variantId}::uuid, ${l.unitPrice}::bigint, ${l.quantity}::int, ${l.name}::text, ${l.sku}::text, ${l.imageUrl}::text, ${l.variantOptions ? JSON.stringify(l.variantOptions) : null}::jsonb)`,
     ),
     sql`, `,
   );
@@ -81,7 +90,7 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
   try {
     const result = await db.execute(sql`
       with lines as (
-        select * from (values ${rows}) as l(inventory_id, product_id, variant_id, price, qty, name, sku, image_url, options)
+        select * from (values ${rows}) as l(inventory_id, fulfillment, product_id, variant_id, price, qty, name, sku, image_url, options)
       ),
       priced as (
         select count(*)::int as ok
@@ -89,6 +98,8 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
           join products p on p.id = l.product_id and p.status = 'ACTIVE'
           left join product_variants v on v.id = l.variant_id
          where coalesce(v.price, p.price) = l.price
+           and p.product_type = l.fulfillment
+           and (l.fulfillment <> 'DIGITAL' or (l.variant_id is null and exists (select 1 from digital_assets da where da.product_id = p.id and da.is_active)))
            and (l.variant_id is null or (v.id is not null and v.is_active and v.product_id = p.id))
       ),
       upd as (
@@ -101,24 +112,24 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
         returning i.id
       ),
       chk as materialized (
-        select 1 / (case when (select ok from priced) = ${n} and (select count(*) from upd) = ${n} then 1 else 0 end) as x
+        select 1 / (case when (select ok from priced) = ${n} and (select count(*) from upd) = ${nPhysical} then 1 else 0 end) as x
       ),
       ord as (
         insert into orders (id, order_number, user_id, cart_id, email, customer_name, customer_phone, status, currency,
-                            subtotal, shipping_total, tax_total, total, shipping_method_id, shipping_method_name,
+                            subtotal, shipping_total, tax_total, total, requires_shipping, shipping_method_id, shipping_method_name,
                             shipping_address, billing_address, pricing_snapshot, customer_notes)
         select ${orderId}::uuid, ${orderNumber}::text, ${input.userId}::uuid, ${input.cartId}::uuid, ${input.customer.email}::text,
                ${input.customer.name}::text, ${input.customer.phone}::text, 'PENDING', ${input.currency}::text,
-               ${amounts.subtotal}::bigint * chk.x, ${amounts.shippingTotal}::bigint, ${amounts.taxTotal}::bigint, ${amounts.total}::bigint,
+               ${amounts.subtotal}::bigint * chk.x, ${amounts.shippingTotal}::bigint, ${amounts.taxTotal}::bigint, ${amounts.total}::bigint, ${input.requiresShipping}::boolean,
                ${snapshot.shipping.methodId}::uuid, ${shippingMethodName}::text,
                ${JSON.stringify(input.address)}::jsonb, ${JSON.stringify(input.address)}::jsonb, ${JSON.stringify(snapshot)}::jsonb, ${input.notes}::text
           from chk
         returning id
       ),
       items as (
-        insert into order_items (order_id, product_id, variant_id, name_snapshot, sku_snapshot, variant_options_snapshot,
+        insert into order_items (order_id, product_id, variant_id, fulfillment_type, name_snapshot, sku_snapshot, variant_options_snapshot,
                                  image_url_snapshot, unit_price_snapshot, unit_cost_snapshot, quantity, line_total)
-        select ${orderId}::uuid, l.product_id, l.variant_id, l.name, l.sku, l.options, l.image_url, l.price,
+        select ${orderId}::uuid, l.product_id, l.variant_id, l.fulfillment, l.name, l.sku, l.options, l.image_url, l.price,
                coalesce(v.cost, p.cost), l.qty, l.price * l.qty
           from lines l
           join products p on p.id = l.product_id
@@ -129,6 +140,7 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
         insert into inventory_reservations (order_id, inventory_id, quantity, expires_at)
         select ${orderId}::uuid, l.inventory_id, l.qty, now() + make_interval(mins => ${RESERVATION_MINUTES}::int)
           from lines l
+         where l.inventory_id is not null
         returning expires_at
       ),
       pay as (
@@ -147,7 +159,7 @@ export async function createPendingOrder(db: Database, input: CreatePendingOrder
     `);
     const row = result.rows[0] as { items?: number; reserved_until?: string | Date } | undefined;
     if (!row || Number(row.items) !== n) return { ok: false, code: "error" };
-    return { ok: true, orderId, orderNumber, paymentId, providerOrderNumber, total: amounts.total, reservedUntil: new Date(String(row.reserved_until)) };
+    return { ok: true, orderId, orderNumber, paymentId, providerOrderNumber, total: amounts.total, reservedUntil: row.reserved_until ? new Date(String(row.reserved_until)) : new Date(Date.now() + RESERVATION_MINUTES * 60_000) };
   } catch (error) {
     const code = pgErrorCode(error);
     const constraint = pgConstraint(error);

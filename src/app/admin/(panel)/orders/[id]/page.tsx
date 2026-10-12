@@ -72,7 +72,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
           <tbody>
             {items.map((item) => (
               <tr key={item.id} className="border-b border-celeste/50">
-                <td className="py-2 pr-3">{item.name}<span className="block text-xs text-ink/60">SKU {item.sku}</span></td>
+                <td className="py-2 pr-3">{item.name}<span className="block text-xs text-ink/60">SKU {item.sku}{item.fulfillment === "DIGITAL" ? " · Digital (PDF)" : ""}</span></td>
                 <td className="py-2 pr-3 whitespace-nowrap">{item.quantity} × {money(item.unitPrice)}</td>
                 <td className="py-2 text-right whitespace-nowrap">{money(item.lineTotal)}</td>
               </tr>
@@ -89,7 +89,8 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
       </section>
 
       <section className={card}>
-        <h2 className="text-xl font-bold">Cliente y entrega</h2>
+        <h2 className="text-xl font-bold">{order.requiresShipping ? "Cliente y entrega" : "Cliente y facturación"}</h2>
+        {!order.requiresShipping && <p className="mt-2 rounded-xl bg-aqua/15 px-3 py-2 text-sm text-navy">Pedido solo digital: no requiere envío. La dirección es la de facturación que pidió la pasarela de pago.</p>}
         <p className="mt-2 text-sm">{order.customerName ?? "—"} · <span className="break-all">{order.email}</span> · {order.customerPhone ?? "sin teléfono"}</p>
         <p className="mt-1 text-sm">{address.line1}{address.line2 ? `, ${address.line2}` : ""} · {address.district ? `${address.district}, ` : ""}{address.city}, {address.stateProvince} · CP {address.postalCode ?? "—"} · Costa Rica</p>
         {order.customerNotes && <p className="mt-1 text-sm">Nota de la clienta: {order.customerNotes}</p>}

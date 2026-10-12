@@ -89,6 +89,7 @@ export async function calculateCheckoutTotals(
       quantity: line.quantity,
       unitPrice: line.unitPrice,
       status: line.status,
+      fulfillment: line.fulfillment,
     })),
     tax,
     destination: input.destination,

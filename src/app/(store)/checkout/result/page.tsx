@@ -48,7 +48,28 @@ export default async function CheckoutResultPage({ searchParams }: { searchParam
         <p className="font-display text-sm font-bold uppercase tracking-wide text-navy/70">Pedido {result.orderNumber}</p>
         <h1 className="mt-2 text-4xl font-bold">{heading}</h1>
 
-        {view === "paid" && <Notice tone="success" className="mt-5">Gracias por tu compra. Tilopay confirmó el pago y ya estamos preparando tu pedido. Te enviamos la confirmación a {result.email}.</Notice>}
+        {view === "paid" && <Notice tone="success" className="mt-5">Gracias por tu compra. Tilopay confirmó el pago{result.requiresShipping ? " y ya estamos preparando tu pedido" : ""}. Te enviamos la confirmación a {result.email}.</Notice>}
+        {view === "paid" && result.downloads.length > 0 && (
+          <div className="mt-5 rounded-3xl border-2 border-aqua/60 bg-paper p-5 sm:p-6">
+            <h2 className="font-display text-xl font-bold text-navy">Tus libros digitales</h2>
+            <ul className="mt-3 space-y-3">
+              {result.downloads.map((item) => (
+                <li key={item.orderItemId} className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="font-semibold text-ink">{item.name}</span>
+                  {item.available ? (
+                    <a href={`/api/downloads/${item.orderItemId}?t=${encodeURIComponent(token)}`} rel="nofollow" className="inline-flex min-h-11 items-center rounded-full bg-navy px-6 py-2 font-display text-sm font-bold text-paper hover:bg-ink">Descargar PDF</a>
+                  ) : (
+                    <span className="text-sm text-coral">Archivo en revisión: escribinos a {siteConfig.contact.email}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-4 text-xs text-ink/65">
+              {result.downloadsEmailed ? `También te enviamos los enlaces a ${result.email}; duran 72 horas. ` : ""}
+              Podés volver a esta página cuando quieras para descargar de nuevo, o <Link href={routes.recoverPurchase} className="font-semibold text-navy underline underline-offset-4">pedir un enlace nuevo</Link> con tu correo y número de pedido.
+            </p>
+          </div>
+        )}
         {view === "verifying" && <Notice tone="info" className="mt-5">Todavía no recibimos la confirmación de Tilopay. <strong>No se ha confirmado ningún cobro.</strong> Si ya pagaste, tocá «Verificar mi pago» en unos segundos. Tu pedido queda guardado por un tiempo limitado.</Notice>}
         {view === "failed" && <Notice tone="error" className="mt-5">El pago no fue aprobado. Podés intentar de nuevo con la misma tarjeta u otra. Si tu banco muestra un cargo que no ves reflejado acá, escribinos a {siteConfig.contact.email}.</Notice>}
         {view === "cancelled" && result.chargedWhileCancelled && <Notice tone="warning" className="mt-5"><strong>Recibimos un pago para este pedido, pero ya había sido cancelado.</strong> Nuestro equipo lo está revisando y se va a comunicar con vos para reembolsarte o completar el pedido. Si querés, escribinos a {siteConfig.contact.email} con tu número de pedido.</Notice>}
@@ -64,10 +85,10 @@ export default async function CheckoutResultPage({ searchParams }: { searchParam
           <dl className="mt-3 space-y-1 border-t border-celeste pt-3 text-sm">
             <div className="flex justify-between"><dt>Subtotal</dt><dd>{money(result.subtotal)}</dd></div>
             <div className="flex justify-between"><dt>Impuestos</dt><dd>{money(result.taxTotal)}</dd></div>
-            <div className="flex justify-between"><dt>Envío</dt><dd>{result.shippingTotal === 0 ? "Gratis" : money(result.shippingTotal)}</dd></div>
+            <div className="flex justify-between"><dt>Envío</dt><dd>{!result.requiresShipping ? "No aplica (entrega digital)" : result.shippingTotal === 0 ? "Gratis" : money(result.shippingTotal)}</dd></div>
             <div className="flex justify-between text-base font-bold text-navy"><dt>Total</dt><dd>{money(result.total)}</dd></div>
           </dl>
-          <p className="mt-3 text-xs text-ink/60">Entrega en: {result.destination}</p>
+          {result.requiresShipping && <p className="mt-3 text-xs text-ink/60">Entrega en: {result.destination}</p>}
         </div>
 
         {(view === "verifying" || view === "failed") && (

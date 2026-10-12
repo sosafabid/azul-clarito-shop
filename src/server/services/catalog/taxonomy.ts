@@ -16,9 +16,9 @@ export async function listCollectionOptions(db: Database): Promise<TaxonomyOptio
   return db.select({ id: collections.id, name: collections.name }).from(collections).orderBy(collections.name);
 }
 
-type Input = { categoryId: string | null; newCategory: string | null; collectionId: string | null; newCollection: string | null };
+type Input = { categoryId: string | null; newCategory: string | null; collectionIds: readonly string[]; newCollection: string | null };
 export type ResolvedTaxonomy =
-  | { ok: true; categoryId: string | null; collectionId: string | null }
+  | { ok: true; categoryId: string | null; collectionIds: string[] }
   | { ok: false; errors: Record<string, string> };
 
 async function findOrCreate(db: Database, table: typeof categories | typeof collections, name: string): Promise<string | null> {
@@ -46,7 +46,7 @@ async function exists(db: Database, table: typeof categories | typeof collection
 export async function resolveTaxonomy(db: Database, input: Input): Promise<ResolvedTaxonomy> {
   const errors: Record<string, string> = {};
   let categoryId: string | null = null;
-  let collectionId: string | null = null;
+  const collectionIds = new Set<string>();
 
   if (input.newCategory) {
     categoryId = await findOrCreate(db, categories, input.newCategory);
@@ -56,13 +56,16 @@ export async function resolveTaxonomy(db: Database, input: Input): Promise<Resol
     else errors.categoryId = "Esa categoría ya no existe.";
   }
 
+  for (const id of input.collectionIds) {
+    if (await exists(db, collections, id)) collectionIds.add(id);
+    else errors.collectionIds = "Una de las colecciones ya no existe.";
+  }
+  // Una colección nueva se SUMA a las elegidas (antes reemplazaba a la única colección).
   if (input.newCollection) {
-    collectionId = await findOrCreate(db, collections, input.newCollection);
-    if (!collectionId) errors.newCollection = "El nombre de la colección no es válido.";
-  } else if (input.collectionId) {
-    if (await exists(db, collections, input.collectionId)) collectionId = input.collectionId;
-    else errors.collectionId = "Esa colección ya no existe.";
+    const created = await findOrCreate(db, collections, input.newCollection);
+    if (created) collectionIds.add(created);
+    else errors.newCollection = "El nombre de la colección no es válido.";
   }
 
-  return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, categoryId, collectionId };
+  return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, categoryId, collectionIds: [...collectionIds] };
 }

@@ -208,6 +208,7 @@ const contactNote = () => `Si tenés dudas, escribinos a ${siteConfig.contact.em
 export function renderOrderReceived(data: EmailEventMap["order_received"], baseUrl: string): RenderedEmail {
   const subject = `Recibimos tu pedido ${data.orderNumber} — Azul Clarito`;
   const intro = `${greeting(data.customerName)}, recibimos tu pedido ${data.orderNumber}.`;
+  const shipped = data.requiresShipping !== false;
   const html = layout({
     baseUrl,
     preheader: "Estamos esperando la confirmación de tu pago.",
@@ -215,31 +216,34 @@ export function renderOrderReceived(data: EmailEventMap["order_received"], baseU
     paragraphs: [
       `${escapeHtml(intro)} Estamos esperando la confirmación del pago: <strong>todavía no hemos confirmado ningún cobro</strong>. Apenas se confirme, te avisamos por acá.`,
       orderLinesHtml(data),
-      `Destino de entrega: ${escapeHtml(data.destination)}.`,
+      shipped ? `Destino de entrega: ${escapeHtml(data.destination)}.` : "Tu pedido es digital: no tiene envío. Los enlaces de descarga llegan apenas se confirme el pago.",
     ],
     button: data.statusUrl ? { label: "Ver el estado de mi pedido", url: data.statusUrl } : undefined,
     notes: [contactNote()],
   });
-  const text = plain([intro, "Estamos esperando la confirmación del pago: todavía no hemos confirmado ningún cobro. Apenas se confirme, te avisamos.", orderLinesText(data), `Destino de entrega: ${data.destination}.`, data.statusUrl ? `Estado del pedido: ${data.statusUrl}` : undefined, contactNote()]);
+  const text = plain([intro, "Estamos esperando la confirmación del pago: todavía no hemos confirmado ningún cobro. Apenas se confirme, te avisamos.", orderLinesText(data), shipped ? `Destino de entrega: ${data.destination}.` : "Tu pedido es digital: no tiene envío. Los enlaces de descarga llegan apenas se confirme el pago.", data.statusUrl ? `Estado del pedido: ${data.statusUrl}` : undefined, contactNote()]);
   return { subject, html, text };
 }
 
 export function renderPaymentConfirmed(data: EmailEventMap["payment_confirmed"], baseUrl: string): RenderedEmail {
   const subject = `¡Pago confirmado! Pedido ${data.orderNumber} — Azul Clarito`;
   const intro = `${greeting(data.customerName)}, ¡gracias por tu compra!`;
+  const shipped = data.requiresShipping !== false;
+  const digitalNote = data.hasDigital ? "Tus libros digitales: te enviamos aparte un correo con los enlaces de descarga, y también los ves en la página de tu pedido." : null;
   const html = layout({
     baseUrl,
     preheader: `Confirmamos el pago de tu pedido ${data.orderNumber}.`,
     title: "¡Pago confirmado!",
     paragraphs: [
-      `${escapeHtml(intro)} Confirmamos el pago de tu pedido <strong>${escapeHtml(data.orderNumber)}</strong>. Ya estamos preparando tus cosas con mucho cariño.`,
+      `${escapeHtml(intro)} Confirmamos el pago de tu pedido <strong>${escapeHtml(data.orderNumber)}</strong>.${shipped ? " Ya estamos preparando tus cosas con mucho cariño." : ""}`,
       orderLinesHtml(data),
-      `Lo enviamos a: ${escapeHtml(data.destination)}. Cuando salga el paquete te avisamos con los datos de seguimiento.`,
+      ...(shipped ? [`Lo enviamos a: ${escapeHtml(data.destination)}. Cuando salga el paquete te avisamos con los datos de seguimiento.`] : []),
+      ...(digitalNote ? [escapeHtml(digitalNote)] : []),
     ],
     button: data.statusUrl ? { label: "Ver mi pedido", url: data.statusUrl } : undefined,
     notes: [contactNote()],
   });
-  const text = plain([intro, `Confirmamos el pago de tu pedido ${data.orderNumber}. Ya estamos preparando tus cosas.`, orderLinesText(data), `Lo enviamos a: ${data.destination}. Cuando salga el paquete te avisamos con los datos de seguimiento.`, data.statusUrl ? `Ver mi pedido: ${data.statusUrl}` : undefined, contactNote()]);
+  const text = plain([intro, `Confirmamos el pago de tu pedido ${data.orderNumber}.${shipped ? " Ya estamos preparando tus cosas." : ""}`, orderLinesText(data), shipped ? `Lo enviamos a: ${data.destination}. Cuando salga el paquete te avisamos con los datos de seguimiento.` : undefined, digitalNote ?? undefined, data.statusUrl ? `Ver mi pedido: ${data.statusUrl}` : undefined, contactNote()]);
   return { subject, html, text };
 }
 
@@ -286,13 +290,15 @@ export function renderAdminNewOrder(data: EmailEventMap["admin_new_order"], base
     paragraphs: [
       `Pedido <strong>${escapeHtml(data.orderNumber)}</strong> de ${escapeHtml(who)}. El pago fue verificado con el proveedor${data.transactionId ? ` (transacción ${escapeHtml(data.transactionId)})` : ""}.`,
       orderLinesHtml(data),
-      `Entrega: ${escapeHtml(data.destination)}. Envío manual: preparalo y anotá el seguimiento en el panel.`,
+      data.requiresShipping === false
+        ? "Pedido solo digital: no requiere envío. La clienta recibe sus enlaces de descarga por correo y en la página de su pedido."
+        : `Entrega: ${escapeHtml(data.destination)}. Envío manual: preparalo y anotá el seguimiento en el panel.${data.hasDigital ? " Incluye libros digitales (se entregan solos por descarga)." : ""}`,
       ...(data.needsReview ? [`<strong>Atención:</strong> este pedido tiene una alerta de pago pendiente de revisar en el panel.`] : []),
     ],
     button: { label: "Abrir el pedido en el panel", url: data.adminUrl },
     notes: [],
   });
-  const text = plain([`Pedido ${data.orderNumber} de ${who}. Pago verificado con el proveedor${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, orderLinesText(data), `Entrega: ${data.destination}.`, data.needsReview ? "ATENCIÓN: este pedido tiene una alerta de pago pendiente de revisar en el panel." : undefined, `Panel: ${data.adminUrl}`]);
+  const text = plain([`Pedido ${data.orderNumber} de ${who}. Pago verificado con el proveedor${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, orderLinesText(data), data.requiresShipping === false ? "Pedido solo digital: no requiere envío." : `Entrega: ${data.destination}.`, data.needsReview ? "ATENCIÓN: este pedido tiene una alerta de pago pendiente de revisar en el panel." : undefined, `Panel: ${data.adminUrl}`]);
   return { subject, html, text };
 }
 
@@ -312,5 +318,25 @@ export function renderAdminPaymentReview(data: EmailEventMap["admin_payment_revi
     notes: [],
   });
   const text = plain([`Tilopay aprobó un pago para el pedido ${data.orderNumber} de ${who}${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, data.reason, "No se envió confirmación a la clienta y el stock NO se tocó. Reembolsá en el portal de Tilopay o resolvé manualmente y dejá la nota en el panel.", `Panel: ${data.adminUrl}`]);
+  return { subject, html, text };
+}
+
+// ── Libros digitales ─────────────────────────────────────────────────────────
+// Estos correos solo se envían con el pago VERIFICADO. Los enlaces son temporales: el correo lo dice y explica cómo pedir uno nuevo.
+export function renderDigitalDownloads(data: EmailEventMap["digital_delivery"], baseUrl: string, kind: "delivery" | "recovery"): RenderedEmail {
+  const subject = kind === "delivery" ? `Tus libros digitales — Pedido ${data.orderNumber} — Azul Clarito` : `Nuevos enlaces de descarga — Pedido ${data.orderNumber}`;
+  const intro = kind === "delivery" ? `${greeting(data.customerName)}, ¡gracias por tu compra! Tus libros digitales ya están listos.` : `${greeting(data.customerName)}, acá están los nuevos enlaces de descarga de tu pedido ${data.orderNumber}.`;
+  const recover = `${baseUrl}/recuperar-compra`;
+  const expiry = `Los enlaces son personales y vencen en ${data.expiresHours} horas. Cuando venzan, podés pedir otros en ${recover} con tu correo y tu número de pedido.`;
+  const links = data.downloads.map((d) => `<a href="${escapeHtml(d.url)}" style="color:${COLORS.navy};font-weight:bold;">Descargar «${escapeHtml(d.name)}» (PDF)</a>`);
+  const html = layout({
+    baseUrl,
+    preheader: "Tus enlaces de descarga están listos.",
+    title: kind === "delivery" ? "Tus libros digitales" : "Nuevos enlaces de descarga",
+    paragraphs: [escapeHtml(intro), ...links, escapeHtml(expiry), "No compartas estos enlaces: llevan tu compra."],
+    button: data.statusUrl ? { label: "Ver mi pedido", url: data.statusUrl } : undefined,
+    notes: [contactNote()],
+  });
+  const text = plain([intro, ...data.downloads.map((d) => `Descargar «${d.name}»: ${d.url}`), expiry, "No compartas estos enlaces: llevan tu compra.", data.statusUrl ? `Ver mi pedido: ${data.statusUrl}` : undefined, contactNote()]);
   return { subject, html, text };
 }

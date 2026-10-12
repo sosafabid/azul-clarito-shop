@@ -122,7 +122,7 @@ describe("formulario de producto: categoría, colección, estado inicial", () =>
 
 describe("auditoría de edición", () => {
   const before: ProductEditableFields = {
-    name: "A", slug: "a", sku: "A-1", shortDescription: null, description: null, categoryId: null, collectionId: null,
+    name: "A", slug: "a", sku: "A-1", shortDescription: null, description: null, categoryId: null, collectionIds: "", productType: "PHYSICAL",
     isFeatured: false, isNew: false, isLimitedEdition: false, price: 1000, cost: 500, currency: "CRC", lowStockThreshold: 3, availableStock: 5,
   };
   it("lista solo los campos que cambiaron", () => {

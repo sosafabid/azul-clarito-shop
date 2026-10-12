@@ -1,10 +1,14 @@
 import "server-only";
 
 /** Utilidades para leer formularios del panel (solo servidor). */
+const MULTI_VALUE_FIELDS = new Set(['collectionIds']);
+
 export function formToRecord(formData: FormData): Record<string, string> {
   const record: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
-    if (typeof value === "string") record[key] = value;
+    if (typeof value !== "string") continue;
+    // Casillas múltiples (p. ej. `collectionIds`): todos los valores, separados por coma.
+    record[key] = key in record && MULTI_VALUE_FIELDS.has(key) ? `${record[key]},${value}` : value;
   }
   return record;
 }

@@ -1,4 +1,5 @@
 import type { LineStatus } from "@/domain/cart";
+import type { ProductType } from "@/domain/fulfillment";
 
 /**
  * Contrato del carrito.
@@ -28,6 +29,8 @@ export type CartLineView = {
   lineTotal: number;
   currency: string;
   status: LineStatus;
+  /** PHYSICAL o DIGITAL (los digitales no se envían ni usan inventario). */
+  fulfillment: ProductType;
   /** Tope para el botón "+": lo disponible, con máximo general (nunca más de 20). */
   maxQuantity: number;
   /** Unidades disponibles, SOLO cuando hay menos que las del carrito (para el mensaje "solo quedan N"). */

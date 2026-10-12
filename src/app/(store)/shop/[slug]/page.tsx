@@ -97,6 +97,20 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                 availability: variant.availability,
               }))}
             />
+            {product.productType === "DIGITAL" && (
+              <p className="mt-4 rounded-2xl bg-aqua/15 p-4 text-sm leading-relaxed text-navy">
+                <strong>Libro digital (PDF).</strong> Sin envío: apenas se confirme tu pago podés descargarlo desde la página de tu pedido y te enviamos el enlace por correo.
+              </p>
+            )}
+            {product.collections.length > 0 && (
+              <p className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+                {product.collections.map((collection) => (
+                  <Link key={collection.id} href={routes.shopCollection(collection.slug)} className="rounded-full border border-celeste px-3 py-1 font-semibold text-navy hover:border-navy">
+                    {collection.name}
+                  </Link>
+                ))}
+              </p>
+            )}
             <p className="mt-3 text-sm text-ink/60">El pago en línea estará disponible muy pronto. Mientras tanto, podés ir armando tu carrito.</p>
           </div>
         </div>

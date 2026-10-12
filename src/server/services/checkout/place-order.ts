@@ -59,7 +59,8 @@ export async function placeOrder(
     shippingMethodId: null,
   });
   if (totals.blockers.length > 0) return fail("empty_or_blocked", totals.blockers.map((b) => b.message).join(" "));
-  if (totals.shipping.state !== "selected") return fail("shipping_not_configured");
+  // Pedido solo digital: no hay envío que configurar. Si hay algo físico, tiene que haber tarifa para el destino.
+  if (totals.shipping.required && totals.shipping.state !== "selected") return fail("shipping_not_configured");
   if (!totals.canProceed || !totals.snapshot) return fail("empty_or_blocked");
   const currency: CurrencyCode = toCurrency(totals.currency);
   if (!state.config.currencies.includes(currency)) return fail("currency_not_supported");
@@ -68,19 +69,22 @@ export async function placeOrder(
   if (!cartId) return fail("empty_or_blocked");
   if (await getPendingOrderForCart(db, input.owner)) return fail("pending_exists");
 
-  // Fila de inventario de cada línea (producto simple = variante nula; con variantes = una fila por variante).
-  const productIds = [...new Set(cart.lines.map((line) => line.productId))];
-  const inventoryRows = await db.select({ id: inventory.id, productId: inventory.productId, variantId: inventory.variantId }).from(inventory).where(inArray(inventory.productId, productIds));
+  // Fila de inventario de cada línea FÍSICA (producto simple = variante nula; con variantes = una fila por variante).
+  // Las líneas digitales no tienen inventario: no se reservan ni se descuentan.
+  const productIds = [...new Set(cart.lines.filter((line) => line.fulfillment === "PHYSICAL").map((line) => line.productId))];
+  const inventoryRows = productIds.length > 0 ? await db.select({ id: inventory.id, productId: inventory.productId, variantId: inventory.variantId }).from(inventory).where(inArray(inventory.productId, productIds)) : [];
   const variantIds = cart.lines.map((l) => l.variantId).filter((v): v is string => v !== null);
   const optionRows = variantIds.length > 0 ? await db.select({ id: productVariants.id, options: productVariants.options }).from(productVariants).where(inArray(productVariants.id, variantIds)) : [];
   const optionsOf = new Map(optionRows.map((row) => [row.id, row.options as Record<string, string> | null]));
 
   const lines: OrderLineInput[] = [];
   for (const line of cart.lines) {
-    const row = inventoryRows.find((r) => r.productId === line.productId && r.variantId === line.variantId);
-    if (!row) return fail("empty_or_blocked");
+    const digital = line.fulfillment === "DIGITAL";
+    const row = digital ? null : inventoryRows.find((r) => r.productId === line.productId && r.variantId === line.variantId);
+    if (!digital && !row) return fail("empty_or_blocked");
     lines.push({
-      inventoryId: row.id,
+      inventoryId: row?.id ?? null,
+      fulfillment: line.fulfillment,
       productId: line.productId,
       variantId: line.variantId,
       name: line.variantLabel ? `${line.name} (${line.variantLabel})` : line.name,
@@ -110,6 +114,7 @@ export async function placeOrder(
     },
     notes: form.notes || null,
     snapshot: totals.snapshot,
+    requiresShipping: totals.shipping.required,
     currency,
     lines,
   };

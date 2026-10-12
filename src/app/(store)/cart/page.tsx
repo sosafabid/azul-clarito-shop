@@ -72,6 +72,7 @@ export default async function CartPage() {
                           {line.name}
                         </Link>
                         {line.variantLabel && <p className="text-sm font-semibold text-ink/80">{line.variantLabel}</p>}
+                        {line.fulfillment === "DIGITAL" && <p className="text-sm font-semibold text-navy">Digital · PDF · sin envío</p>}
                         <p className="text-xs text-ink/55">SKU {line.sku}</p>
                       </div>
                       <p className="text-right">

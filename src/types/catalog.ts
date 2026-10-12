@@ -4,6 +4,8 @@
  * Nota: aquí NO existe `cost`. Si un campo no está en estos tipos, no sale del
  * servidor. Ver `src/server/services/catalog/public.ts`.
  */
+import type { ProductType } from "@/domain/fulfillment";
+
 export type PublicProductVariant = {
   id: string;
   sku: string;
@@ -34,6 +36,8 @@ export type PublicProduct = {
   currency: string;
   categoryId: string | null;
   collectionId: string | null;
+  /** FÍSICO (se envía) o DIGITAL (descarga en PDF tras el pago). */
+  productType: ProductType;
   isFeatured: boolean;
   isNew: boolean;
   isLimitedEdition: boolean;
@@ -47,6 +51,9 @@ export type ProductAvailability = "in_stock" | "low_stock" | "out_of_stock";
 
 export type PublicProductListItem = PublicProduct & {
   categoryName: string | null;
+  categorySlug: string | null;
+  /** Todas las colecciones ACTIVAS del producto. */
+  collections: { id: string; slug: string; name: string }[];
   imageUrl: string | null;
   imageAlt: string | null;
   availability: ProductAvailability;

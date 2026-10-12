@@ -6,7 +6,7 @@ import type { ParsedProduct } from "./product-form";
 
 const input = (over: Partial<ParsedProduct> = {}): ParsedProduct => ({
   name: "Camiseta", slug: "camiseta", sku: "CAM-1", shortDescription: null, description: null, status: "ACTIVE", categoryId: null, newCategory: null,
-  collectionId: null, newCollection: null, imageUrls: [], isFeatured: false, isNew: false, isLimitedEdition: false, currency: "CRC",
+  collectionIds: [], productType: "PHYSICAL", newCollection: null, imageUrls: [], isFeatured: false, isNew: false, isLimitedEdition: false, currency: "CRC",
   price: 10000, cost: 1, availableStock: 99, lowStockThreshold: 0, ...over,
 });
 

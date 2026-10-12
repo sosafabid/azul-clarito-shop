@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { EconomicsPanel } from "@/components/admin/EconomicsPanel";
+import { DigitalAssetManager } from "@/components/admin/DigitalAssetManager";
 import { ImagesManager } from "@/components/admin/ImagesManager";
 import { DatabaseNotice, Notice } from "@/components/admin/Notice";
 import { PRODUCT_NOTICES } from "@/components/admin/notices";
@@ -18,6 +19,8 @@ import { requirePermission } from "@/server/auth";
 import { getAdminProduct, getStockSummaries } from "@/server/services/catalog/admin";
 import { listProductImages } from "@/server/services/catalog/admin-images";
 import { listProductVariants } from "@/server/services/catalog/admin-variants";
+import { countProductSales, getActiveDigitalAsset } from "@/server/services/digital/assets";
+import { isDigitalStorageConfigured } from "@/server/services/digital/storage";
 import { listCategoryOptions, listCollectionOptions } from "@/server/services/catalog/taxonomy";
 import { isBlobConfigured } from "@/server/services/images/storage";
 
@@ -51,6 +54,8 @@ export default async function EditProductPage({ params, searchParams }: { params
     listProductVariants(db, id),
     getStockSummaries(db, [id]),
   ]);
+  const digitalAsset = product.productType === "DIGITAL" ? await getActiveDigitalAsset(db, id) : null;
+  const digitalSales = product.productType === "DIGITAL" ? await countProductSales(db, id) : 0;
   const visibleVariants = redactCosts(variants, caps.costs);
   const stock = summaries.get(id) ?? { available: 0, reserved: 0, sold: 0, valueAtCost: null, potentialSales: 0, potentialProfit: null, rowsWithoutCost: 0 };
   const canDelete = caps.delete;
@@ -71,7 +76,8 @@ export default async function EditProductPage({ params, searchParams }: { params
     lowStockThreshold: String(product.lowStockThreshold ?? 0),
     categoryId: product.categoryId ?? "",
     newCategory: "",
-    collectionId: product.collectionId ?? "",
+    collectionIds: product.collections.map((c) => c.id),
+    productType: product.productType,
     newCollection: "",
     imageUrls: "",
     isFeatured: product.isFeatured,
@@ -90,7 +96,8 @@ export default async function EditProductPage({ params, searchParams }: { params
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink/70">
             {product.sku} <ProductStatusBadge status={product.status} />
             {product.categoryName && <span>· {product.categoryName}</span>}
-            {product.collectionName && <span>· {product.collectionName}</span>}
+            {product.collections.length > 0 && <span>· {product.collections.map((c) => c.name).join(", ")}</span>}
+            <span>· {product.productType === "DIGITAL" ? "Digital (PDF)" : "Físico"}</span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -123,8 +130,16 @@ export default async function EditProductPage({ params, searchParams }: { params
         caps={{ costs: caps.costs, stock: caps.stock, publish: caps.publish }}
       />
 
+      {product.productType === "DIGITAL" && (
+        <DigitalAssetManager
+          productId={product.id}
+          asset={digitalAsset ? { fileName: digitalAsset.fileName, sizeBytes: digitalAsset.sizeBytes, sha256: digitalAsset.sha256, createdAt: digitalAsset.createdAt.toISOString() } : null}
+          storageReady={isDigitalStorageConfigured()}
+          sales={digitalSales}
+        />
+      )}
       <ImagesManager productId={product.id} productName={product.name} images={images} uploadsEnabled={isBlobConfigured()} />
-      <VariantsManager productId={product.id} currency={product.currency} basePrice={product.price} variants={visibleVariants} canDelete={canDelete} caps={{ costs: caps.costs, stock: caps.stock }} />
+      {product.productType === "PHYSICAL" && <VariantsManager productId={product.id} currency={product.currency} basePrice={product.price} variants={visibleVariants} canDelete={canDelete} caps={{ costs: caps.costs, stock: caps.stock }} />}
 
       <section className="space-y-3 rounded-3xl border-2 border-coral/50 bg-paper p-5 sm:p-7">
         <h2 className="text-xl font-bold">Zona de peligro</h2>

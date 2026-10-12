@@ -1,4 +1,5 @@
 import { STORE_COUNTRY, resolveRate, type Destination, type RateCandidate, type ShippingType } from "./shipping";
+import type { ProductType } from "./fulfillment";
 import { isTaxable, lineTax, type TaxRounding, type TaxRuleInput } from "./tax";
 
 /**
@@ -32,6 +33,8 @@ export type TotalsLineInput = {
   quantity: number;
   unitPrice: number;
   status: "ok" | "insufficient" | "unavailable";
+  /** PHYSICAL (por defecto) o DIGITAL. Solo las líneas físicas cuentan para el envío. */
+  fulfillment?: ProductType;
 };
 
 export type MethodInput = {
@@ -66,8 +69,9 @@ export type CheckoutBlocker = { code: "empty_cart" | "line_unavailable" | "line_
  * unsupported_country  → el destino no es Costa Rica (por ahora solo se envía dentro del país)
  * not_configured       → todavía no hay una tarifa de envío configurada para ese destino
  * selected             → listo (el único método disponible se aplica solo)
+ * not_required         → el pedido es solo de productos digitales: no hay envío (₡0) ni se necesita elegir método
  */
-export type ShippingState = "needs_destination" | "unsupported_country" | "not_configured" | "selected";
+export type ShippingState = "needs_destination" | "unsupported_country" | "not_configured" | "selected" | "not_required";
 
 export type PricingSnapshot = {
   version: 1;
@@ -75,7 +79,23 @@ export type PricingSnapshot = {
   subtotal: number;
   items: { productId: string; variantId: string | null; sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number; taxable: boolean; taxAmount: number }[];
   tax: { applied: boolean; code: string | null; name: string | null; rateBps: number | null; included: boolean; rounding: TaxRounding | null; amount: number };
-  shipping: { methodId: string; code: string; name: string; type: ShippingType; rateId: string; amount: number; freeApplied: boolean; destination: Destination };
+  /**
+   * `required: false` = pedido solo digital: sin método ni tarifa (`methodId`/`rateId` nulos), monto 0. En pedidos con productos físicos
+   * (también los mixtos) el monto sale de la tarifa y `physicalSubtotal` es la base con la que se calculó (los digitales no cuentan).
+   * Los snapshots anteriores a los productos digitales no traen `required`: se leen como `true`.
+   */
+  shipping: {
+    required?: boolean;
+    methodId: string | null;
+    code: string;
+    name: string;
+    type: ShippingType | null;
+    rateId: string | null;
+    amount: number;
+    freeApplied: boolean;
+    destination: Destination | null;
+    physicalSubtotal?: number;
+  };
   total: number;
   computedAt: string;
 };
@@ -93,6 +113,8 @@ export type CheckoutTotals = {
     selected: ShippingOption | null;
     amount: number | null;
     selectionInvalid: boolean;
+    /** false = solo productos digitales. */
+    required: boolean;
   };
   /** Subtotal + impuesto (si no estaba incluido), SIN envío: lo que ya se sabe aunque falte elegir el envío. */
   totalBeforeShipping: number;
@@ -139,6 +161,9 @@ export function computeTotals(input: {
     });
 
   const subtotal = priced.reduce((sum, p) => sum + p.lineTotal, 0);
+  // Solo lo FÍSICO se envía: la tarifa y el umbral de envío gratis se calculan con el subtotal físico (un libro digital no "empuja" el envío gratis).
+  const physicalSubtotal = priced.filter((p) => (p.line.fulfillment ?? "PHYSICAL") === "PHYSICAL").reduce((sum, p) => sum + p.lineTotal, 0);
+  const shippingRequired = priced.length === 0 || priced.some((p) => (p.line.fulfillment ?? "PHYSICAL") === "PHYSICAL");
   const taxAmount = priced.reduce((sum, p) => sum + p.taxAmount, 0);
   const included = tax?.included ?? false;
   const totalBeforeShipping = subtotal + (included ? 0 : taxAmount);
@@ -150,29 +175,35 @@ export function computeTotals(input: {
   const national = pickNationalMethod(input.methods);
   const unsupportedCountry = destination !== null && destination.country.toUpperCase() !== STORE_COUNTRY;
   let options: ShippingOption[] = [];
-  if (destination && !unsupportedCountry && national) {
-    const resolved = resolveRate(national.rates, destination, subtotal, currency);
+  if (shippingRequired && destination && !unsupportedCountry && national) {
+    const resolved = resolveRate(national.rates, destination, physicalSubtotal, currency);
     if (resolved) {
       options = [{ methodId: national.id, code: national.code, name: national.name, description: national.description, type: national.type, rateId: resolved.rate.id, amount: resolved.amount, free: resolved.free, estimatedDaysMin: national.estimatedDaysMin, estimatedDaysMax: national.estimatedDaysMax }];
     }
   }
   const requested = input.selectedMethodId ?? null;
   const selected = options.length === 1 && (requested === null || requested === options[0].methodId) ? options[0] : null;
-  const state: ShippingState = unsupportedCountry ? "unsupported_country" : !destination ? "needs_destination" : selected ? "selected" : "not_configured";
+  const state: ShippingState = !shippingRequired ? "not_required" : unsupportedCountry ? "unsupported_country" : !destination ? "needs_destination" : selected ? "selected" : "not_configured";
   const selectionInvalid = requested !== null && options.length === 1 && requested !== options[0].methodId;
 
-  const shippingAmount = selected ? selected.amount : null;
+  const shippingAmount = !shippingRequired ? 0 : selected ? selected.amount : null;
   const total = blockers.length === 0 && shippingAmount !== null ? totalBeforeShipping + shippingAmount : null;
 
+  const shippingSnapshot: PricingSnapshot["shipping"] | null = !shippingRequired
+    ? { required: false, methodId: null, code: "digital", name: "Entrega digital", type: null, rateId: null, amount: 0, freeApplied: false, destination, physicalSubtotal: 0 }
+    : selected && destination
+      ? { required: true, methodId: selected.methodId, code: selected.code, name: selected.name, type: selected.type, rateId: selected.rateId, amount: selected.amount, freeApplied: selected.free, destination, physicalSubtotal }
+      : null;
+
   const snapshot: PricingSnapshot | null =
-    total !== null && selected && destination
+    total !== null && shippingSnapshot
       ? {
           version: 1,
           currency,
           subtotal,
           items: priced.map((p) => ({ productId: p.line.productId, variantId: p.line.variantId, sku: p.line.sku, name: p.line.name, quantity: p.line.quantity, unitPrice: p.line.unitPrice, lineTotal: p.lineTotal, taxable: p.taxable, taxAmount: p.taxAmount })),
           tax: { applied: tax !== null, code: tax?.code ?? null, name: tax?.name ?? null, rateBps: tax?.rateBps ?? null, included, rounding: tax?.rounding ?? null, amount: taxAmount },
-          shipping: { methodId: selected.methodId, code: selected.code, name: selected.name, type: selected.type, rateId: selected.rateId, amount: selected.amount, freeApplied: selected.free, destination },
+          shipping: shippingSnapshot,
           total,
           computedAt: (input.now ?? new Date()).toISOString(),
         }
@@ -190,6 +221,7 @@ export function computeTotals(input: {
       selected,
       amount: shippingAmount,
       selectionInvalid,
+      required: shippingRequired,
     },
     totalBeforeShipping,
     total,

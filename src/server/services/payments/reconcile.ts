@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { after } from "next/server";
 import type { Database } from "@/db/client";
 import { orders, payments } from "@/db/schema";
+import { RESERVATION_MINUTES } from "@/domain/tilopay";
 import { cancelPendingOrder, flagForReview, type PaymentSource } from "./lifecycle";
 import { notifyVerifyResult, verifyPayment } from "./verify";
 import { retryFailedEmails, sendOrderEmail } from "@/server/services/orders/notify";
@@ -45,7 +46,10 @@ export async function settleExpiredOrder(db: Database, orderId: string, source: 
   }
   if (inconclusive) {
     const [late] = await db.execute(sql`
-      select 1 as late from inventory_reservations where order_id = ${orderId}::uuid and status = 'ACTIVE' and expires_at < now() - make_interval(hours => ${GRACE_HOURS}::int) limit 1
+      select 1 as late from orders o where o.id = ${orderId}::uuid and (
+        exists (select 1 from inventory_reservations r where r.order_id = o.id and r.status = 'ACTIVE' and r.expires_at < now() - make_interval(hours => ${GRACE_HOURS}::int))
+        or (not exists (select 1 from inventory_reservations r where r.order_id = o.id) and o.placed_at < now() - make_interval(hours => ${GRACE_HOURS}::int, mins => ${RESERVATION_MINUTES}::int))
+      ) limit 1
     `).then((r) => r.rows as { late: number }[]);
     if (!late) return "deferred";
     await flagForReview(db, orderId, "El pedido venció y Tilopay no respondió a la verificación: se canceló por seguridad. Revisar en el portal de Tilopay si hubo un cobro.");
@@ -68,7 +72,11 @@ export async function settleExpiredOrders(db: Database, options: { limit?: numbe
   const expired = await db.execute(sql`
     select o.id from orders o
      where o.status = 'PENDING' and o.payment_review_reason is null
-       and exists (select 1 from inventory_reservations r where r.order_id = o.id and r.status = 'ACTIVE' and r.expires_at < now())
+       and (
+         exists (select 1 from inventory_reservations r where r.order_id = o.id and r.status = 'ACTIVE' and r.expires_at < now())
+         -- Pedido solo digital: no tiene reservas de stock; vence con el mismo plazo desde que se creó (y se verifica con Tilopay igual).
+         or (not exists (select 1 from inventory_reservations r where r.order_id = o.id) and o.requires_shipping = false and o.placed_at < now() - make_interval(mins => ${RESERVATION_MINUTES}::int))
+       )
      order by o.placed_at asc limit ${limit}::int
   `);
   out.found = expired.rows.length;

@@ -1,8 +1,9 @@
 import "server-only";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "@/db/client";
+import { isDigitalStorageConfigured } from "@/server/services/digital/storage";
 import { releaseExpiredReservations } from "@/server/services/payments/reconcile";
-import { categories, productImages, productVariants, products } from "@/db/schema";
+import { categories, collections, productCollections, productImages, productVariants, products } from "@/db/schema";
 import { stockState } from "@/domain/inventory-view";
 import type {
   ProductAvailability,
@@ -22,7 +23,7 @@ import { publicImageColumns, publicProductColumns, toPublicImage, toPublicProduc
  *  - La disponibilidad se calcula aquí y solo se devuelve el ESTADO
  *    (en stock / pocas unidades / agotado), no las cantidades.
  */
-const AVAILABLE_SQL = sql<number>`coalesce((select sum(i.available_stock) from inventory i left join product_variants pv on pv.id = i.variant_id where i.product_id = ${products.id} and (i.variant_id is null or pv.is_active)), 0)`.mapWith(
+const AVAILABLE_SQL = sql<number>`case when ${products.productType} = 'DIGITAL' then (case when ${sql.raw(isDigitalStorageConfigured() ? "true" : "false")} and exists (select 1 from digital_assets da where da.product_id = ${products.id} and da.is_active) then 1 else 0 end) else coalesce((select sum(i.available_stock) from inventory i left join product_variants pv on pv.id = i.variant_id where i.product_id = ${products.id} and (i.variant_id is null or pv.is_active)), 0) end`.mapWith(
   Number,
 );
 const THRESHOLD_SQL = sql<number>`coalesce((select max(i.low_stock_threshold) from inventory i where i.product_id = ${products.id}), 0)`.mapWith(
@@ -40,6 +41,7 @@ export function toAvailability(availableStock: number, lowStockThreshold: number
 const listColumns = {
   ...publicProductColumns,
   categoryName: categories.name,
+  categorySlug: categories.slug,
   imageUrl: PRIMARY_IMAGE_URL,
   imageAlt: PRIMARY_IMAGE_ALT,
   availableStock: AVAILABLE_SQL,
@@ -49,6 +51,7 @@ const listColumns = {
 
 type ListRow = Parameters<typeof toPublicProduct>[0] & {
   categoryName: string | null;
+  categorySlug: string | null;
   imageUrl: string | null;
   imageAlt: string | null;
   availableStock: number;
@@ -56,10 +59,12 @@ type ListRow = Parameters<typeof toPublicProduct>[0] & {
   hasVariants: boolean;
 };
 
-function toListItem(row: ListRow): PublicProductListItem {
+function toListItem(row: ListRow, collectionsOf: ReadonlyMap<string, PublicProductListItem["collections"]> = new Map()): PublicProductListItem {
   return {
     ...toPublicProduct(row),
     categoryName: row.categoryName,
+    categorySlug: row.categorySlug,
+    collections: collectionsOf.get(row.id) ?? [],
     imageUrl: row.imageUrl,
     imageAlt: row.imageAlt,
     availability: toAvailability(row.availableStock, row.lowStockThreshold),
@@ -67,15 +72,43 @@ function toListItem(row: ListRow): PublicProductListItem {
   };
 }
 
-export async function listPublicProducts(db: Database): Promise<PublicProductListItem[]> {
+/** Colecciones ACTIVAS de cada producto (un producto puede estar en varias). */
+async function loadCollectionsOf(db: Database, productIds: readonly string[]): Promise<Map<string, PublicProductListItem["collections"]>> {
+  const map = new Map<string, PublicProductListItem["collections"]>();
+  if (productIds.length === 0) return map;
+  const rows = await db
+    .select({ productId: productCollections.productId, id: collections.id, slug: collections.slug, name: collections.name })
+    .from(productCollections)
+    .innerJoin(collections, eq(collections.id, productCollections.collectionId))
+    .where(and(inArray(productCollections.productId, [...productIds]), eq(collections.isActive, true)))
+    .orderBy(asc(collections.sortOrder), asc(collections.name));
+  for (const row of rows) map.set(row.productId, [...(map.get(row.productId) ?? []), { id: row.id, slug: row.slug, name: row.name }]);
+  return map;
+}
+
+export type CatalogFilter = { categorySlug?: string | null; collectionSlug?: string | null };
+
+/**
+ * Productos ACTIVOS, opcionalmente filtrados por categoría y/o colección (se combinan con AND).
+ * El filtro se aplica en la base de datos con los slugs ya validados; una categoría/colección inactiva no filtra nada visible.
+ */
+export async function listPublicProducts(db: Database, filter: CatalogFilter = {}): Promise<PublicProductListItem[]> {
   await releaseExpiredReservations(db);
+  const conditions: SQL[] = [eq(products.status, "ACTIVE")];
+  if (filter.categorySlug) conditions.push(eq(categories.slug, filter.categorySlug), eq(categories.isActive, true));
+  if (filter.collectionSlug) {
+    conditions.push(
+      sql`exists (select 1 from product_collections pc join collections co on co.id = pc.collection_id where pc.product_id = ${products.id} and co.slug = ${filter.collectionSlug} and co.is_active)`,
+    );
+  }
   const rows = await db
     .select(listColumns)
     .from(products)
     .leftJoin(categories, eq(categories.id, products.categoryId))
-    .where(eq(products.status, "ACTIVE"))
+    .where(and(...conditions))
     .orderBy(desc(products.isFeatured), desc(products.createdAt));
-  return rows.map(toListItem);
+  const collectionsOf = await loadCollectionsOf(db, rows.map((row) => row.id));
+  return rows.map((row) => toListItem(row, collectionsOf));
 }
 
 export async function getPublicProductBySlug(db: Database, slug: string): Promise<PublicProductDetail | null> {
@@ -115,5 +148,6 @@ export async function getPublicProductBySlug(db: Database, slug: string): Promis
     availability: toAvailability(variant.availableStock, variant.lowStockThreshold),
   }));
 
-  return { ...toListItem(row), images: images.map(toPublicImage), variants };
+  const collectionsOf = await loadCollectionsOf(db, [row.id]);
+  return { ...toListItem(row, collectionsOf), images: images.map(toPublicImage), variants };
 }

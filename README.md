@@ -47,6 +47,7 @@ defecto **la tienda ya funciona en tu computadora** (no pide base de datos todav
 | `DATABASE_URL_UNPOOLED` | Conexión directa de Neon, para migraciones | Opcional (recomendada) |
 | `AUTH_SECRET` | Opcional: refuerza el HMAC de los contadores anti-abuso (`auth_throttle`) | Recomendada en producción (cualquier texto largo aleatorio) |
 | `BLOB_READ_WRITE_TOKEN` | Almacenamiento de imágenes (Vercel Blob) | Para SUBIR archivos desde el panel (por URL no hace falta). Secreto de servidor |
+| `DIGITAL_BLOB_READ_WRITE_TOKEN` | Almacén **privado** de los PDF de libros digitales (Vercel Blob, acceso Private). Secreto de servidor | Para subir y vender productos digitales (ver `docs/PRODUCTOS-DIGITALES.md`) |
 | `RESEND_API_KEY` | Clave de Resend. **Solo servidor** | Para enviar correos (verificación y restablecimiento) |
 | `RESEND_FROM_EMAIL` | Remitente, p. ej. `Azul Clarito <cuenta@TU-DOMINIO-VERIFICADO>`. El dominio **debe estar verificado en Resend** | Para enviar correos (`EMAIL_FROM` se sigue aceptando como alternativa) |
 | `ADMIN_NOTIFY_EMAIL` | Aviso de pedidos nuevos a management | Cuando haya pedidos |
@@ -484,6 +485,16 @@ Algoritmo de `OrderHash`; especificación y autenticación del webhook; valores 
 `orderNumber`; tipos de `processModification` (reembolso/captura/reverso); monedas permitidas;
 si `key` es pública o secreta; diferencias de credenciales entre prueba y producción;
 vigencia de la URL del formulario de pago.
+
+## Catálogo con filtros y productos digitales
+
+Resumen; el detalle (decisiones, supuestos, migración 0013, pruebas) está en `docs/PRODUCTOS-DIGITALES.md`.
+
+- `/shop` filtra por **categoría** y **colección** (parámetros `categoria` y `coleccion`, combinables, con conteos y "Limpiar filtros"); cada colección tiene su página en `/shop/colecciones/<slug>`. Un producto tiene una categoría y varias colecciones.
+- Cada producto es **Físico** o **Digital** (campo explícito en el panel). Un digital no tiene inventario, variantes ni envío; se compra de a 1.
+- Pedido solo digital: envío ₡0 y sin dirección de entrega (la pasarela sí pide una dirección de facturación). Pedido mixto: el envío se calcula solo con lo físico.
+- Configuración del almacén privado de los PDF (paso a paso, errores y verificación): `docs/PRODUCTOS-DIGITALES.md` §2b.
+- La descarga se habilita únicamente cuando el servidor confirmó el pago con Tilopay; enlaces temporales y con límite, PDF en almacenamiento privado.
 
 ## Seguridad de dependencias
 

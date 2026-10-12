@@ -5,6 +5,7 @@ import { isUuid } from "./ids";
 import { MAX_IMAGES_PER_PRODUCT, parseImageUrls } from "./images";
 import { SKU_PATTERN } from "./product-form-shared";
 import { unitEconomics } from "./product-economics";
+import { isProductType, type ProductType } from "./fulfillment";
 
 /** Lo que llega del formulario (todo texto). */
 export type ProductFormInput = Partial<Record<string, string>>;
@@ -21,8 +22,11 @@ export type ParsedProduct = {
   categoryId: string | null;
   /** Nombre de una categoría NUEVA a crear (tiene prioridad sobre `categoryId`). */
   newCategory: string | null;
-  collectionId: string | null;
+  /** Colecciones existentes (un producto puede estar en varias). */
+  collectionIds: string[];
   newCollection: string | null;
+  /** FÍSICO (inventario + envío) o DIGITAL (PDF, sin inventario ni envío). Explícito: no se deduce de la categoría. */
+  productType: ProductType;
   /** URLs de imágenes https para asociar al crear. */
   imageUrls: string[];
   isFeatured: boolean;
@@ -40,6 +44,7 @@ export type ProductFormResult =
   | { ok: false; errors: Record<string, string> };
 
 export const MAX_STOCK = 1_000_000;
+export const MAX_COLLECTIONS_PER_PRODUCT = 12;
 
 function text(input: ProductFormInput, key: string): string {
   return (input[key] ?? "").trim();
@@ -98,8 +103,13 @@ export function parseProductForm(input: ProductFormInput, mode: "create" | "upda
   if (categoryIdRaw !== "" && !isUuid(categoryIdRaw)) errors.categoryId = "Categoría inválida.";
   const newCategory = text(input, "newCategory");
   if (newCategory.length > 60) errors.newCategory = "El nombre de la categoría admite hasta 60 caracteres.";
-  const collectionIdRaw = text(input, "collectionId");
-  if (collectionIdRaw !== "" && !isUuid(collectionIdRaw)) errors.collectionId = "Colección inválida.";
+  // Varias colecciones: llegan como ids separados por coma (el formulario envía una casilla por colección).
+  const collectionIds = [...new Set(text(input, "collectionIds").split(",").map((id) => id.trim()).filter(Boolean))];
+  if (collectionIds.some((id) => !isUuid(id))) errors.collectionIds = "Colección inválida.";
+  if (collectionIds.length > MAX_COLLECTIONS_PER_PRODUCT) errors.collectionIds = `Máximo ${MAX_COLLECTIONS_PER_PRODUCT} colecciones por producto.`;
+  const productTypeRaw = text(input, "productType") || "PHYSICAL";
+  if (!isProductType(productTypeRaw)) errors.productType = "Elegí si el producto es físico o digital.";
+  const productType: ProductType = isProductType(productTypeRaw) ? productTypeRaw : "PHYSICAL";
   const newCollection = text(input, "newCollection");
   if (newCollection.length > 60) errors.newCollection = "El nombre de la colección admite hasta 60 caracteres.";
 
@@ -157,7 +167,8 @@ export function parseProductForm(input: ProductFormInput, mode: "create" | "upda
       status,
       categoryId: categoryIdRaw || null,
       newCategory: newCategory || null,
-      collectionId: collectionIdRaw || null,
+      collectionIds,
+      productType,
       newCollection: newCollection || null,
       imageUrls: images.urls,
       isFeatured: checked(input, "isFeatured"),

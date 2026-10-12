@@ -19,7 +19,14 @@ export type OrderSummaryEmailData = OrderEmailData & {
   destination: string;
   /** Enlace privado para ver el estado del pedido o reintentar el pago (lleva un token: no se registra en logs). */
   statusUrl?: string | null;
+  /** false = pedido solo digital (sin envío). Ausente = true (pedidos anteriores a los productos digitales). */
+  requiresShipping?: boolean;
+  /** El pedido incluye al menos un producto digital. */
+  hasDigital?: boolean;
 };
+
+/** Un libro digital listo para descargar: el enlace es temporal y de un solo pedido (lleva un token: no se registra en logs). */
+export type DigitalDownloadEmailItem = { name: string; url: string };
 
 /**
  * Eventos de email de la tienda y los datos que necesita cada uno.
@@ -39,6 +46,10 @@ export type EmailEventMap = {
   };
   order_delivered: OrderEmailData;
   order_cancelled: OrderSummaryEmailData;
+  /** Enlaces de descarga, enviados SOLO cuando el pago está verificado. */
+  digital_delivery: OrderSummaryEmailData & { downloads: DigitalDownloadEmailItem[]; expiresHours: number };
+  /** Enlaces nuevos pedidos por la clienta con "Recuperar mi compra". */
+  digital_recovery: OrderSummaryEmailData & { downloads: DigitalDownloadEmailItem[]; expiresHours: number };
   refund_issued: OrderEmailData & { refundAmount: number };
   /** Venta CONFIRMADA (pago verificado con el proveedor). `adminUrl` lleva al pedido en el panel. */
   admin_new_order: OrderSummaryEmailData & { customerEmail: string; adminUrl: string; transactionId: string | null; needsReview: boolean };

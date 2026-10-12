@@ -49,7 +49,9 @@ export type ProductEditableFields = {
   shortDescription: string | null;
   description: string | null;
   categoryId: string | null;
-  collectionId: string | null;
+  /** Ids de sus colecciones, ordenados y separados por coma (vacío = ninguna). */
+  collectionIds: string;
+  productType: string;
   isFeatured: boolean;
   isNew: boolean;
   isLimitedEdition: boolean;
