@@ -45,6 +45,8 @@ type ProductFormProps = {
   collections: Option[];
   /** Si el producto tiene variantes, el stock se gestiona en cada una. */
   hasVariants?: boolean;
+  /** Solo en edición: el servidor calculó que el tipo no se puede cambiar (pedidos/pagos activos). Es presentación: el servidor vuelve a aplicar la regla. */
+  typeLock?: { locked: boolean; message: string };
   /** Hay almacenamiento externo configurado (permite subir archivos). */
   uploadsEnabled?: boolean;
   /**
@@ -75,7 +77,8 @@ function Field({ label, error, hint, children }: { label: string; error?: string
   );
 }
 
-export function ProductForm({ action, mode, initial, expectedAvailableStock, systemStock, categories, collections, hasVariants = false, uploadsEnabled = false, caps }: ProductFormProps) {
+export function ProductForm({ action, mode, initial, expectedAvailableStock, systemStock, categories, collections, hasVariants = false, typeLock, uploadsEnabled = false, caps }: ProductFormProps) {
+  const typeLocked = mode === "edit" && Boolean(typeLock?.locked);
   const [state, formAction, pending] = useActionState(action, null);
   const [values, setValues] = useState<ProductFormValues>(initial);
   const [slugTouched, setSlugTouched] = useState(mode === "edit");
@@ -175,12 +178,16 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
               ] as const
             ).map(([value, label]) => (
               <label key={value} className="flex items-center gap-2 font-semibold text-navy">
-                <input type="radio" name="productType" value={value} checked={values.productType === value} onChange={(e) => set("productType", e.target.value)} className="size-5 accent-navy" />
+                <input type="radio" name={typeLocked ? undefined : "productType"} value={value} checked={values.productType === value} disabled={typeLocked} onChange={(e) => set("productType", e.target.value)} className="size-5 accent-navy" />
                 {label}
               </label>
             ))}
           </div>
-          <p className="mt-1 text-xs text-ink/60">No se deduce de la categoría: un libro puede ser físico o digital. Se puede cambiar solo mientras el producto no tenga pedidos.</p>
+          {typeLocked && <input type="hidden" name="productType" value={initial.productType} />}
+          <p className="mt-1 text-xs text-ink/60">
+            No se deduce de la categoría: un libro puede ser físico o digital. Se puede cambiar mientras ningún pedido del producto pueda generar una entrega o un pago pendiente (por ejemplo, si todos están cancelados).
+          </p>
+          {typeLocked && <p className="mt-1 text-xs font-semibold text-navy">{typeLock?.message}</p>}
           {errors.productType && <p role="alert" className="mt-1 text-xs font-semibold text-coral">{errors.productType}</p>}
         </fieldset>
         <Field label="Descripción corta" error={errors.shortDescription}>

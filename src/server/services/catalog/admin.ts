@@ -9,6 +9,7 @@ import { isUuid } from "@/domain/ids";
 import { toInventoryItem } from "@/domain/inventory-view";
 import { changedProductFields, diffProductEconomics, type ProductEditableFields } from "@/domain/product-audit";
 import type { ParsedProduct } from "@/domain/product-form";
+import { evaluateTypeLock, type TypeLockFacts, type TypeLockResult } from "@/domain/product-type-lock";
 import {
   PRODUCT_ACTION_RULES,
   canApplyAction,
@@ -401,8 +402,8 @@ export async function updateProduct(
 
   // El tipo (físico/digital) solo se cambia mientras el producto no tenga historial de ventas, y un digital no puede tener variantes.
   if (input.productType !== current.productType) {
-    const blockers = await getDeleteBlockers(db, id);
-    if (blockers.length > 0) return { ok: false, code: "type_locked", message: "No se puede cambiar el tipo: el producto ya tiene pedidos. Creá otro producto si necesitás la otra versión.", errors: { productType: "El producto ya tiene pedidos: el tipo no se puede cambiar." } };
+    const lock = await getTypeLock(db, id);
+    if (lock.locked) return { ok: false, code: "type_locked", message: lock.message, errors: { productType: lock.message } };
     if (input.productType === "DIGITAL" && current.variantCount > 0) return { ok: false, code: "type_locked", message: "Un producto digital no puede tener variantes. Eliminá las variantes primero.", errors: { productType: "Quitá las variantes antes de hacerlo digital." } };
   }
   const physical = input.productType === "PHYSICAL";
@@ -569,6 +570,54 @@ export async function applyProductAction(db: Database, id: string, action: Produ
     return { ok: false, code: "conflict", message: "El producto cambió de estado mientras tanto. Recargá la página." };
   }
   return { ok: true, status: rule.to };
+}
+
+// ── Cambio de tipo (físico ↔ digital) ───────────────────────────────────
+type LockRow = {
+  order_number: string;
+  status: string;
+  paid_at: string | null;
+  refunded_at: string | null;
+  cancelled_at: string | null;
+  payment_review_reason: string | null;
+  has_confirmation_event: boolean;
+  payments: { status: string; paid_at: string | null; session_requested_at: string | null }[] | null;
+};
+const toDate = (v: string | null) => (v ? new Date(v) : null);
+
+/** Lee (sin escribir nada) los estados REALES de pedidos y pagos del producto. La regla vive en `domain/product-type-lock`. */
+export async function getTypeLockFacts(db: Database, id: string): Promise<TypeLockFacts> {
+  const [res, [sold]] = await Promise.all([
+    db.execute(sql`
+      select o.order_number, o.status::text as status, o.paid_at, o.refunded_at, o.cancelled_at, o.payment_review_reason,
+             exists (select 1 from payment_events e where e.order_id = o.id and e.type like 'payment_confirmed%') as has_confirmation_event,
+             (select json_agg(json_build_object('status', p.status::text, 'paid_at', p.paid_at, 'session_requested_at', p.session_requested_at))
+                from payments p where p.order_id = o.id) as payments
+        from orders o
+       where o.id in (select oi.order_id from order_items oi where oi.product_id = ${id}::uuid)
+    `),
+    db
+      .select({ n: sql<number>`coalesce(sum(${inventory.soldStock}), 0)::int` })
+      .from(inventory)
+      .where(eq(inventory.productId, id)),
+  ]);
+  return {
+    soldStock: Number(sold?.n ?? 0),
+    orders: (res.rows as LockRow[]).map((r) => ({
+      orderNumber: r.order_number,
+      status: r.status,
+      paidAt: toDate(r.paid_at),
+      refundedAt: toDate(r.refunded_at),
+      cancelledAt: toDate(r.cancelled_at),
+      paymentReviewReason: r.payment_review_reason,
+      hasConfirmationEvent: r.has_confirmation_event,
+      payments: (r.payments ?? []).map((p) => ({ status: p.status, paidAt: toDate(p.paid_at), sessionRequestedAt: toDate(p.session_requested_at) })),
+    })),
+  };
+}
+
+export async function getTypeLock(db: Database, id: string): Promise<TypeLockResult> {
+  return evaluateTypeLock(await getTypeLockFacts(db, id));
 }
 
 // ── Eliminación definitiva ──────────────────────────────────────────────

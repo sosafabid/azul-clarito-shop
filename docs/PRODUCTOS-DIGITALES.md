@@ -68,6 +68,19 @@ Reiniciá `npm run dev`. Con `vercel env pull .env.local` también se puede trae
 
 **Reglas que se mantienen:** el PDF nunca tiene URL pública; solo se entrega con pago confirmado por el servidor; un digital sin PDF válido (o sin almacén configurado) no se puede publicar ni comprar.
 
+## 2c. Cambiar el tipo de un producto (físico ↔ digital)
+
+Regla única en `src/domain/product-type-lock.ts`; el servidor (`updateProduct`) la aplica leyendo los estados REALES de la base de datos (`getTypeLockFacts`) y el formulario solo la explica (deshabilita el selector y muestra el motivo). No hace falta migración y la regla solo lee: nunca modifica pedidos, pagos, montos ni referencias.
+
+Se **permite** si todos los pedidos del producto cumplen todo esto:
+- el pedido está `CANCELLED`;
+- ningún pago está `PENDING`, `PAID` ni `REFUNDED`, ni tiene `paid_at` (los pagos `CANCELLED`/`FAILED` no bloquean);
+- el pedido no tiene `paid_at`, `refunded_at`, alerta de revisión de pago abierta (`payment_review_reason`) ni eventos `payment_confirmed*`;
+- ningún pago cancelado con sesión de Tilopay abierta cuyo pedido se canceló hace menos de 72 h (ventana en la que la conciliación sigue vigilando cobros tardíos).
+Además, el inventario no debe tener unidades vendidas (`sold_stock > 0` bloquea).
+
+Se **bloquea** con: pedidos pendientes, pagados, en preparación, empacados, enviados, entregados o reembolsados; pagos confirmados, pendientes, reembolsados o de estado desconocido; revisiones de pago abiertas; cancelaciones recientes con pago iniciado. Un digital sigue sin poder tener variantes. La eliminación definitiva de productos conserva su regla anterior (cualquier pedido la bloquea).
+
 ## 3. Supuestos sin confirmar (verificar antes de vender)
 
 1. **Acceso privado de Vercel Blob.** Confirmado en la documentación oficial (almacenamiento privado, disponible con `@vercel/blob` ≥ 2.3; requiere un almacén creado como *Private*). Lo que **no** se probó es el comportamiento contra un almacén real: solo contra un simulador.

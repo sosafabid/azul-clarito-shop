@@ -16,7 +16,7 @@ import { catalogCapabilities } from "@/domain/capabilities";
 import { redactCosts, stripCosts } from "@/domain/redaction";
 import { updateProductAction } from "@/server/actions/products";
 import { requirePermission } from "@/server/auth";
-import { getAdminProduct, getStockSummaries } from "@/server/services/catalog/admin";
+import { getAdminProduct, getStockSummaries, getTypeLock } from "@/server/services/catalog/admin";
 import { listProductImages } from "@/server/services/catalog/admin-images";
 import { listProductVariants } from "@/server/services/catalog/admin-variants";
 import { countProductSales, getActiveDigitalAsset } from "@/server/services/digital/assets";
@@ -47,12 +47,13 @@ export default async function EditProductPage({ params, searchParams }: { params
   if (!loaded) notFound();
   const product = caps.costs ? loaded : stripCosts(loaded);
 
-  const [categories, collections, images, variants, summaries] = await Promise.all([
+  const [categories, collections, images, variants, summaries, typeLock] = await Promise.all([
     listCategoryOptions(db),
     listCollectionOptions(db),
     listProductImages(db, id),
     listProductVariants(db, id),
     getStockSummaries(db, [id]),
+    getTypeLock(db, id),
   ]);
   const digitalAsset = product.productType === "DIGITAL" ? await getActiveDigitalAsset(db, id) : null;
   const digitalSales = product.productType === "DIGITAL" ? await countProductSales(db, id) : 0;
@@ -127,6 +128,7 @@ export default async function EditProductPage({ params, searchParams }: { params
         categories={categories}
         collections={collections}
         hasVariants={hasVariants}
+        typeLock={{ locked: typeLock.locked, message: typeLock.message }}
         caps={{ costs: caps.costs, stock: caps.stock, publish: caps.publish }}
       />
 
