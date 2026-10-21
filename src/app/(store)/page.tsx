@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { CategoryTile } from "@/components/home/CategoryTile";
-import { BagIcon, BookIcon, HibiscusIcon, MusicIcon, SparkleIcon } from "@/components/ui/icons";
+import { ContentTile, ImageTile } from "@/components/home/CategoryTile";
+import { HibiscusIcon } from "@/components/ui/icons";
 import { ButtonLink } from "@/components/ui/ButtonLink";
 import { Container } from "@/components/ui/Container";
 import { WaveDivider } from "@/components/ui/WaveDivider";
@@ -32,22 +32,6 @@ async function booksHref(): Promise<string> {
 
 export default async function HomePage() {
   const books = await booksHref();
-  const tiles = [
-    { title: "Productos", description: "Piezas con identidad del Caribe de Costa Rica.", icon: <BagIcon className="size-7" />, tone: "bg-celeste", href: routes.shop, cta: "Ver la tienda" },
-    { title: "Libros", description: "Libros digitales en PDF, con descarga apenas confirmás el pago.", icon: <BookIcon className="size-7" />, tone: "bg-sand/70", href: books, cta: "Ver libros" },
-    { title: "Música", description: "Las canciones de Azul Clarito, en Spotify.", icon: <MusicIcon className="size-7" />, tone: "bg-blush/45", href: siteConfig.social.spotify, external: true, cta: "Escuchar" },
-    {
-      title: "Objetos especiales",
-      description: "Jabones artesanales y cuadros de arte.",
-      icon: <SparkleIcon className="size-7" />,
-      tone: "bg-aqua/25",
-      photos: [
-        { src: "/home/jabones.webp", alt: "Jabones artesanales sobre una tabla de bambú" },
-        { src: "/home/cuadro-arte.webp", alt: "Cuadro de arte con mar, arena y piedras" },
-      ],
-    },
-  ];
-
   return (
     <>
       <section className="relative isolate overflow-hidden bg-gradient-to-b from-celeste via-celeste/45 to-paper">
@@ -101,11 +85,26 @@ export default async function HomePage() {
           <p className="mt-3 max-w-lg text-lg text-ink/75">
             Productos, libros, música y objetos especiales hechos con cariño desde Limón.
           </p>
-          <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {tiles.map((tile) => (
-              <CategoryTile key={tile.title} {...tile} />
-            ))}
-          </ul>
+          <div className="mt-10 space-y-5">
+            <ul className="flex flex-col gap-5 lg:flex-row">
+              <ImageTile src="/home/productos.webp" width={1100} height={701} alt="Productos: ropa, accesorios, arte y más para llevar un pedacito del mar contigo" href={routes.shop} label="Productos: ver la tienda" />
+              <ImageTile src="/home/libros.webp" width={1100} height={845} alt="Libros: poesía, historias e ilustraciones que te llevan a otros mundos" href={books} label="Libros: ver los libros" />
+            </ul>
+            <ul className="flex flex-col gap-5 lg:flex-row">
+              <ImageTile src="/home/musica.webp" width={1100} height={597} alt="Música: canciones para sentir, recordar y dejarse llevar" href={siteConfig.social.spotify} external label="Música: escuchar a Azul Clarito en Spotify" />
+              <ContentTile
+                title="Objetos especiales"
+                description="Jabones artesanales y cuadros de arte."
+                href={routes.shop}
+                cta="Explorar"
+                tone="bg-aqua/25"
+                photos={[
+                  { src: "/home/jabones.webp", alt: "Jabones artesanales sobre una tabla de bambú" },
+                  { src: "/home/cuadro-arte.webp", alt: "Cuadro de arte con mar, arena y piedras" },
+                ]}
+              />
+            </ul>
+          </div>
         </Container>
       </section>
 
