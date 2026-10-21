@@ -35,6 +35,7 @@ export const siteConfig = {
     tiktok: "https://www.tiktok.com/@mariamayaceleste",
     threads: "https://www.threads.net/@mariamayaceleste",
     youtube: "https://www.youtube.com/@mariacelesteamaya",
+    spotify: "https://open.spotify.com/intl-es/artist/1brdje9qLllYUDumAR4Vm9",
   },
 
   /** Envíos: la primera versión es MANUAL (sin APIs de transportistas). */

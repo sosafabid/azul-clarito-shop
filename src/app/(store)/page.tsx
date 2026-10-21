@@ -6,20 +6,48 @@ import { Container } from "@/components/ui/Container";
 import { WaveDivider } from "@/components/ui/WaveDivider";
 import { mainSiteRoutes, routes } from "@/config/routes";
 import { siteConfig } from "@/config/site";
+import { getDb, isDatabaseConfigured } from "@/db";
+import { shopHref } from "@/domain/catalog-filters";
+import { getCatalogFacets } from "@/server/services/catalog/facets";
+
+// Se regenera cada 5 minutos: el enlace de "Libros" depende de la categoría real del catálogo.
+export const revalidate = 300;
 
 export const metadata: Metadata = {
   title: { absolute: `${siteConfig.name} — ${siteConfig.tagline}` },
   alternates: { canonical: "/" },
 };
 
-const tiles = [
-  { title: "Productos", icon: <BagIcon className="size-7" />, tone: "bg-celeste" },
-  { title: "Libros", icon: <BookIcon className="size-7" />, tone: "bg-sand/70" },
-  { title: "Música", icon: <MusicIcon className="size-7" />, tone: "bg-blush/45" },
-  { title: "Objetos especiales", icon: <SparkleIcon className="size-7" />, tone: "bg-aqua/25" },
-];
+/** Enlace de "Libros": la categoría del catálogo que se llame así; si no se encuentra, la tienda completa. */
+async function booksHref(): Promise<string> {
+  if (!isDatabaseConfigured()) return routes.shop;
+  try {
+    const { categories } = await getCatalogFacets(getDb(), { category: null, collection: null });
+    const books = categories.find((c) => /libro/i.test(c.slug) || /libro/i.test(c.name));
+    return books ? shopHref({ category: books.slug }) : routes.shop;
+  } catch {
+    return routes.shop;
+  }
+}
 
-export default function HomePage() {
+export default async function HomePage() {
+  const books = await booksHref();
+  const tiles = [
+    { title: "Productos", description: "Piezas con identidad del Caribe de Costa Rica.", icon: <BagIcon className="size-7" />, tone: "bg-celeste", href: routes.shop, cta: "Ver la tienda" },
+    { title: "Libros", description: "Libros digitales en PDF, con descarga apenas confirmás el pago.", icon: <BookIcon className="size-7" />, tone: "bg-sand/70", href: books, cta: "Ver libros" },
+    { title: "Música", description: "Las canciones de Azul Clarito, en Spotify.", icon: <MusicIcon className="size-7" />, tone: "bg-blush/45", href: siteConfig.social.spotify, external: true, cta: "Escuchar" },
+    {
+      title: "Objetos especiales",
+      description: "Jabones artesanales y cuadros de arte.",
+      icon: <SparkleIcon className="size-7" />,
+      tone: "bg-aqua/25",
+      photos: [
+        { src: "/home/jabones.webp", alt: "Jabones artesanales sobre una tabla de bambú" },
+        { src: "/home/cuadro-arte.webp", alt: "Cuadro de arte con mar, arena y piedras" },
+      ],
+    },
+  ];
+
   return (
     <>
       <section className="relative isolate overflow-hidden bg-gradient-to-b from-celeste via-celeste/45 to-paper">
@@ -68,10 +96,10 @@ export default function HomePage() {
       <section aria-labelledby="secciones" className="bg-paper pb-20 pt-6 sm:pb-28">
         <Container>
           <h2 id="secciones" className="max-w-md text-3xl font-bold sm:text-4xl">
-            Lo que viene
+            Explorá la tienda
           </h2>
           <p className="mt-3 max-w-lg text-lg text-ink/75">
-            Estamos armando cada sección con calma. Muy pronto vas a encontrarlas acá.
+            Productos, libros, música y objetos especiales hechos con cariño desde Limón.
           </p>
           <ul className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {tiles.map((tile) => (
@@ -85,7 +113,7 @@ export default function HomePage() {
         <Container className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 id="mientras-tanto" className="text-2xl font-bold sm:text-3xl">
-              Mientras tanto, descubrí a Azul Clarito
+              Descubrí más de Azul Clarito
             </h2>
             <p className="mt-2 text-ink/75">Música, historias y libros en el sitio oficial.</p>
           </div>
