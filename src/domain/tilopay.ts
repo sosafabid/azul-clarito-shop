@@ -189,8 +189,21 @@ export function amountToCents(value: string): number | null {
  * Ambiente: en modo `sandbox` solo se acepta una transacción de ambiente "Test" (así un cobro REAL nunca se da por bueno
  * por accidente); en modo `production`, una de ambiente "Test" tampoco se acepta.
  */
+/**
+ * ¿Esta transacción de Tilopay corresponde a nuestro `orderNumber`? En el portal real Tilopay muestra (y devuelve) el número con
+ * un prefijo propio del comercio, p. ej. `PFC031168-AC-2026-000007` para el que enviamos como `AC-2026-000007`. Se acepta el
+ * número exacto, o el mismo número precedido por UN prefijo de letras+dígitos y un guion. Nada más: `…-000007-2` (otro intento)
+ * no coincide con `AC-2026-000007`, ni un número que solo "termine parecido".
+ */
+export function matchesProviderOrder(received: string, expected: string): boolean {
+  if (received === expected) return true;
+  const suffix = `-${expected}`;
+  if (!received.endsWith(suffix)) return false;
+  return /^[A-Za-z]{2,5}\d{3,10}$/.test(received.slice(0, received.length - suffix.length));
+}
+
 export function evaluateConsult(items: readonly ConsultItem[], expected: ExpectedPayment, mode: TilopayMode): PaymentVerdict {
-  const mine = items.filter((item) => item.orderNumber === expected.orderNumber);
+  const mine = items.filter((item) => matchesProviderOrder(item.orderNumber, expected.orderNumber));
   if (mine.length === 0) return { kind: "not_found" };
 
   const approved = mine.find((item) => item.code === "1");

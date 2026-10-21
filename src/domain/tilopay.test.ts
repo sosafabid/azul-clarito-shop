@@ -4,6 +4,7 @@ import {
   buildProcessPaymentBody,
   crStateCode,
   evaluateConsult,
+  matchesProviderOrder,
   formatProviderAmount,
   isTilopayPaymentUrl,
   parseConsultResponse,
@@ -131,5 +132,27 @@ describe("evaluateConsult — única fuente de verdad del pago", () => {
   });
   it("con varios intentos con el mismo orderNumber gana la aprobada", () => {
     expect(evaluateConsult([item({ code: "5", providerId: "1" }), item({ providerId: "2" })], expected, "sandbox")).toMatchObject({ kind: "approved", providerId: "2" });
+  });
+});
+
+describe("número de orden con prefijo de Tilopay (caso real AC-2026-000007)", () => {
+  it("acepta el número exacto y el precedido por el prefijo del comercio", () => {
+    expect(matchesProviderOrder("AC-2026-000007", "AC-2026-000007")).toBe(true);
+    expect(matchesProviderOrder("PFC031168-AC-2026-000007", "AC-2026-000007")).toBe(true);
+    expect(matchesProviderOrder("PFC031168-AC-2026-000007-2", "AC-2026-000007-2")).toBe(true);
+  });
+  it("no confunde intentos ni pedidos distintos", () => {
+    expect(matchesProviderOrder("PFC031168-AC-2026-000007-2", "AC-2026-000007")).toBe(false);
+    expect(matchesProviderOrder("PFC031168-AC-2026-000007", "AC-2026-000007-2")).toBe(false);
+    expect(matchesProviderOrder("PFC031168-AC-2026-000070", "AC-2026-000007")).toBe(false);
+    expect(matchesProviderOrder("XAC-2026-000007", "AC-2026-000007")).toBe(false);
+    expect(matchesProviderOrder("OTRO-PFC031168-AC-2026-000007", "AC-2026-000007")).toBe(false);
+    expect(matchesProviderOrder("-AC-2026-000007", "AC-2026-000007")).toBe(false);
+  });
+  it("evaluateConsult confirma el cobro aprobado aunque venga con prefijo (producción)", () => {
+    const e = { orderNumber: "AC-2026-000007", amountMinor: 113, currency: "CRC" as const };
+    const prod = item({ orderNumber: "PFC031168-AC-2026-000007", amount: "113.00", environment: "Production", providerId: "6130111" });
+    expect(evaluateConsult([prod], e, "production")).toMatchObject({ kind: "approved", providerId: "6130111" });
+    expect(evaluateConsult([item({ ...prod, orderNumber: "PFC031168-AC-2026-000007-2" })], e, "production")).toEqual({ kind: "not_found" });
   });
 });

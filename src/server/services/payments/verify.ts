@@ -100,7 +100,7 @@ export async function verifyPayment(db: Database, paymentId: string, source: Pay
       return { ...base, kind: "review" };
     }
     default:
-      await recordPaymentEvent(db, { orderId: row.orderId, paymentId, source, type: "verify_not_found" });
+      await recordPaymentEvent(db, { orderId: row.orderId, paymentId, source, type: "verify_not_found", detail: { expected: row.providerOrderNumber, received: items.slice(0, 5).map((i) => i.orderNumber.slice(0, 60)), count: items.length } });
       return { ...base, kind: "pending" };
   }
 }
