@@ -111,7 +111,6 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                 ))}
               </p>
             )}
-            <p className="mt-3 text-sm text-ink/60">El pago en línea estará disponible muy pronto. Mientras tanto, podés ir armando tu carrito.</p>
           </div>
         </div>
       </Container>

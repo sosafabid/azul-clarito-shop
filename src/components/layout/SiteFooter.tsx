@@ -82,7 +82,7 @@ export function SiteFooter() {
 
       <div className="border-t border-paper/15">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-5 text-sm text-paper/60 sm:px-8">
-          <p>© {year} Azul Clarito · Limón, Costa Rica</p>
+          <p>© {year} Azul Clarito, desarrollado por Integra Sinergia · Limón, Costa Rica</p>
           <nav aria-label="Legal" className="flex gap-5">
             <Link href={routes.terms} className="hover:text-paper hover:underline">
               Términos y condiciones

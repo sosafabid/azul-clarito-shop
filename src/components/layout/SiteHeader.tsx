@@ -12,7 +12,7 @@ export function SiteHeader() {
     <header className="sticky top-0 z-40">
       <div className="bg-navy text-paper">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-2 text-xs sm:px-8 sm:text-sm">
-          <p>Estamos preparando la tienda.</p>
+          <p>Pago seguro con tarjeta o SINPE Móvil</p>
           <a
             href={siteConfig.mainSiteUrl}
             className="font-semibold underline decoration-paper/40 underline-offset-4 hover:decoration-paper"
