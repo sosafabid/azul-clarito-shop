@@ -12,6 +12,7 @@ export const routes = {
   tilopayReturn: "/api/payments/tilopay/return",
   account: "/account",
   accountOrders: "/account/orders",
+  accountOrder: (orderNumber: string) => `/account/orders/${encodeURIComponent(orderNumber)}`,
   accountLogin: "/account/login",
   accountRegister: "/account/register",
   forgotPassword: "/forgot-password",

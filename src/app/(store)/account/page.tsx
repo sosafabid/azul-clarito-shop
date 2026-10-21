@@ -62,6 +62,14 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         )}
 
         <div className={card}>
+          <h2 className="text-2xl font-bold">Mis pedidos</h2>
+          <p className="mt-2 text-sm text-ink/70">Mirá el estado de tus compras y el detalle de cada pedido.</p>
+          <Link href={routes.accountOrders} className="mt-4 inline-flex min-h-11 items-center rounded-full bg-navy px-6 py-2 font-display text-sm font-bold text-paper hover:bg-ink">
+            Ver mis pedidos
+          </Link>
+        </div>
+
+        <div className={card}>
           <h2 className="text-2xl font-bold">Mis datos</h2>
           <div className="mt-5">
             <ProfileForm action={updateProfileAction} email={overview.email} initial={{ name: overview.name ?? "", phone: overview.phone ?? "" }} />
