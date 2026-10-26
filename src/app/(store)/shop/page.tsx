@@ -10,11 +10,7 @@ import { parseCatalogSelection } from "@/domain/catalog-filters";
 import { getCatalogFacets } from "@/server/services/catalog/facets";
 import { listPublicProducts } from "@/server/services/catalog/queries";
 
-export const metadata: Metadata = {
-  title: "Tienda",
-  // La tienda aún no está lanzada: no indexar hasta el lanzamiento (quitar esta línea entonces).
-  robots: { index: false, follow: true },
-};
+export const metadata: Metadata = { title: "Tienda" };
 
 // Los datos salen de la base de datos en cada visita (aún sin caché).
 export const dynamic = "force-dynamic";

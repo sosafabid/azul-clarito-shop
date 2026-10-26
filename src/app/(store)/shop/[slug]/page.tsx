@@ -22,10 +22,7 @@ const loadProduct = cache(async (slug: string) => getPublicProductBySlug(getDb()
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
-  const base: Metadata = {
-    // La tienda aún no está lanzada: no indexar hasta el lanzamiento.
-    robots: { index: false, follow: false },
-  };
+  const base: Metadata = {};
   if (!SLUG_PATTERN.test(slug) || !isDatabaseConfigured()) return { ...base, title: "Producto" };
   const product = await loadProduct(slug);
   if (!product) return { ...base, title: "Producto" };
