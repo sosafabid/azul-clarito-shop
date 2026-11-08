@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { AddToCartForm } from "@/components/shop/AddToCartForm";
 import { AvailabilityBadge } from "@/components/shop/AvailabilityBadge";
-import { ProductImage } from "@/components/shop/ProductImage";
+import { ProductGallery } from "@/components/shop/ProductGallery";
 import { ComingSoon } from "@/components/ui/ComingSoon";
 import { Container } from "@/components/ui/Container";
 import { routes } from "@/config/routes";
@@ -47,7 +47,11 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
   const product = await loadProduct(slug);
   if (!product) notFound();
 
-  const gallery = product.images.filter((image) => image.url !== product.imageUrl);
+  // La foto principal va primero; las demás, en su orden. Todas se pueden ver en grande.
+  const galleryImages = [
+    ...(product.imageUrl ? [{ id: "main", url: product.imageUrl, alt: product.imageAlt ?? product.name }] : []),
+    ...product.images.filter((image) => image.url !== product.imageUrl).map((image) => ({ id: image.id, url: image.url, alt: image.alt ?? product.name })),
+  ];
   const soldOut = product.availability === "out_of_stock";
 
   return (
@@ -58,18 +62,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         </Link>
 
         <div className="mt-6 grid gap-10 md:grid-cols-2">
-          <div className="space-y-4">
-            <ProductImage src={product.imageUrl} alt={product.imageAlt ?? product.name} className="rounded-3xl" sizes="(min-width: 768px) 50vw, 100vw" />
-            {gallery.length > 0 && (
-              <ul className="grid grid-cols-4 gap-3">
-                {gallery.slice(0, 4).map((image) => (
-                  <li key={image.id}>
-                    <ProductImage src={image.url} alt={image.alt ?? product.name} className="rounded-xl" sizes="12vw" />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <ProductGallery images={galleryImages} productName={product.name} />
 
           <div>
             {product.categoryName && (
