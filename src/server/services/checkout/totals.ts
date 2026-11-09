@@ -64,7 +64,7 @@ const EMPTY_CART: CartView = { lines: [], currency: null, subtotal: 0, totalUnit
 
 export async function calculateCheckoutTotals(
   db: Database,
-  input: { owner: CartOwner | null; destination: Destination | null; shippingMethodId: string | null; now?: Date },
+  input: { owner: CartOwner | null; destination: Destination | null; shippingMethodId: string | null; choice?: "DELIVERY" | "PICKUP"; now?: Date },
 ): Promise<{ totals: CheckoutTotals; cart: CartView }> {
   // 1) El carrito se revalida contra la base: producto activo, variante válida, precio actual y stock.
   const cart = input.owner ? await getCartView(db, input.owner) : EMPTY_CART;
@@ -95,6 +95,7 @@ export async function calculateCheckoutTotals(
     destination: input.destination,
     methods,
     selectedMethodId: input.shippingMethodId,
+    choice: input.choice,
     now: input.now,
   });
   return { totals, cart };

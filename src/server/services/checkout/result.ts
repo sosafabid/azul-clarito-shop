@@ -1,5 +1,6 @@
 import "server-only";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { isPickupSnapshot } from "@/domain/checkout";
 import type { Database } from "@/db/client";
 import { orderItems, orderNotifications, orders, paymentEvents, payments } from "@/db/schema";
 import { digitalItemsForPage, isOrderPaid } from "@/server/services/digital/delivery";
@@ -28,6 +29,8 @@ export type CheckoutResult = {
   chargedWhileCancelled: boolean;
   /** false = pedido solo digital: no hay envío ni dirección de entrega. */
   requiresShipping: boolean;
+  /** Se retira en persona: no hay dirección de entrega. */
+  pickup: boolean;
   /** Libros digitales descargables. SOLO con el pago verificado (estado del pedido + pago aprobado en la base); si no, vacío. */
   downloads: { orderItemId: string; name: string; available: boolean }[];
   /** El correo con los enlaces ya se envió (el servicio de correo puede no estar configurado). */
@@ -53,6 +56,7 @@ export async function loadCheckoutResult(db: Database, token: string): Promise<C
   const [mailed] = downloads.length > 0 ? await db.select({ status: orderNotifications.status }).from(orderNotifications).where(and(eq(orderNotifications.orderId, order.id), eq(orderNotifications.event, "digital_delivery"))).limit(1) : [];
   return {
     requiresShipping: order.requiresShipping,
+    pickup: isPickupSnapshot(order.pricingSnapshot),
     downloads,
     downloadsEmailed: mailed?.status === "SENT",
     orderNumber: order.orderNumber,

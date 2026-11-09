@@ -18,6 +18,8 @@ export type CheckoutFormInput = {
   line2: string;
   notes: string;
   acceptTerms: boolean;
+  /** La clienta eligió retirar en persona (la dirección que escribe es de facturación, no de entrega). */
+  pickup: boolean;
 };
 
 export type CheckoutFormErrors = Partial<Record<keyof CheckoutFormInput, string>>;
@@ -50,6 +52,7 @@ export function parseCheckoutForm(formData: FormData): ParsedCheckoutForm {
     line2: clean(formData.get("line2"), 200),
     notes: clean(formData.get("notes"), 500),
     acceptTerms: formData.get("acceptTerms") === "on" || formData.get("acceptTerms") === "true",
+    pickup: formData.get("entrega") === "retiro",
   };
   const errors: CheckoutFormErrors = {};
   if (input.name.length < 2 || !input.name.includes(" ")) errors.name = "Escribí tu nombre y apellido.";

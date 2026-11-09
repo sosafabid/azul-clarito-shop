@@ -81,6 +81,7 @@ export default async function AccountOrderPage({ params }: { params: Promise<{ o
             <div className="flex justify-between text-base font-bold text-navy"><dt>Total</dt><dd>{money(order.total)}</dd></div>
           </dl>
           {order.destination && <p className="mt-3 text-xs text-ink/60">Entrega en: {order.destination}</p>}
+          {order.pickup && <p className="mt-3 text-xs text-ink/60">Retiro en persona: te contactamos para coordinar el día y la hora.</p>}
           {order.customerNotes && <p className="mt-2 text-xs text-ink/60">Tu nota: {order.customerNotes}</p>}
         </div>
 

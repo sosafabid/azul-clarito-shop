@@ -1,6 +1,7 @@
 import "server-only";
 import { asc, eq, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
+import { isPickupSnapshot } from "@/domain/checkout";
 import { orderItems, orders, payments } from "@/db/schema";
 import { toCurrency } from "@/domain/money";
 import { serverConfig } from "@/config/server";
@@ -77,6 +78,7 @@ async function loadOrder(db: Database, orderId: string): Promise<LoadedOrder | n
       taxIncluded: order.pricingSnapshot?.tax.included ?? false,
       destination: [address.district, address.city, address.stateProvince].filter(Boolean).join(", "),
       requiresShipping: order.requiresShipping,
+      pickup: isPickupSnapshot(order.pricingSnapshot),
       hasDigital: items.some((item) => item.fulfillmentType === "DIGITAL"),
     },
   };

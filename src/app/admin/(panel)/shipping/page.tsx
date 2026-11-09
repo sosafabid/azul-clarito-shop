@@ -64,7 +64,7 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
         <p className="mt-1 text-sm text-ink/70">
           Por ahora se envía <strong>solo dentro de Costa Rica</strong> y la logística es manual (vos preparás el paquete y lo llevás a Correos de Costa Rica u otro servicio; el seguimiento lo anotás en el pedido).
           La clienta ve un único método, <strong>&ldquo;Envío nacional&rdquo;</strong>: el primero <strong>activo</strong> de tipo <em>Entrega a domicilio</em> (por prioridad). Podés cambiar su nombre y descripción acá.
-          Los métodos de <em>Retiro en persona</em> todavía no se ofrecen en el checkout.
+          Si hay un método <strong>activo</strong> de tipo <em>Retiro en persona</em>, la clienta también puede elegir retirar su pedido: no paga envío (₡0, o la tarifa &ldquo;todo el país&rdquo; que le pongas) y no escribe dirección de entrega. Su <em>descripción</em> se le muestra en el checkout: usala para decir dónde y cuándo se retira.
         </p>
         <p className="mt-2 text-sm text-ink/70">
           Cada método tiene tarifas por zona: provincia(s), cantón(es) o código postal; sin zona = todo el país. Gana la más específica dentro de su rango de pedido. Una zona como la GAM se arma

@@ -58,7 +58,7 @@ export async function startPaymentAction(_previous: CheckoutState, formData: For
 
   // Si el total que la clienta vio ya no coincide con el recalculado (cambió un precio, una tasa o una tarifa), no se cobra a ciegas.
   const seen = Number(String(formData.get("seenTotal") ?? ""));
-  const { totals } = await calculateCheckoutTotals(db, { owner, destination: { country: "CR", province: form.province, city: form.city, postalCode: form.postalCode }, shippingMethodId: null });
+  const { totals } = await calculateCheckoutTotals(db, { owner, destination: { country: "CR", province: form.province, city: form.city, postalCode: form.postalCode }, shippingMethodId: null, choice: form.pickup ? "PICKUP" : "DELIVERY" });
   if (Number.isInteger(seen) && totals.total !== null && seen !== totals.total) {
     revalidatePath(routes.checkout);
     return { message: "El total de tu compra cambió. Revisá el resumen actualizado antes de pagar." };

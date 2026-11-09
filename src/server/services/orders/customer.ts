@@ -27,6 +27,8 @@ export type CustomerOrderDetail = Omit<CustomerOrderSummary, "itemCount" | "firs
   taxTotal: number;
   shippingTotal: number;
   shippingMethodName: string | null;
+  /** Se retira en persona: no hay dirección de entrega. */
+  pickup: boolean;
   carrier: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
@@ -71,7 +73,7 @@ export async function getCustomerOrder(db: Database, viewer: CustomerOrderViewer
   const res = await db.execute(sql`
     select o.id, o.order_number, o.status::text as status, o.currency, o.subtotal, o.tax_total, o.shipping_total, o.total, o.requires_shipping,
            o.shipping_method_name, o.carrier, o.tracking_number, o.tracking_url, o.customer_notes, o.placed_at, o.paid_at, o.shipped_at,
-           o.delivered_at, o.cancelled_at, o.shipping_address
+           o.delivered_at, o.cancelled_at, o.shipping_address, (o.pricing_snapshot -> 'shipping' ->> 'type') = 'PICKUP' as is_pickup
       from orders o
      where o.order_number = ${orderNumber}::text and ${mine(viewer)}
      limit 1
@@ -94,6 +96,7 @@ export async function getCustomerOrder(db: Database, viewer: CustomerOrderViewer
     shippingTotal: Number(o.shipping_total),
     requiresShipping,
     shippingMethodName: (o.shipping_method_name as string | null) ?? null,
+    pickup: o.is_pickup === true,
     carrier: (o.carrier as string | null) ?? null,
     trackingNumber: (o.tracking_number as string | null) ?? null,
     trackingUrl: (o.tracking_url as string | null) ?? null,
@@ -103,7 +106,7 @@ export async function getCustomerOrder(db: Database, viewer: CustomerOrderViewer
     shippedAt: toDate(o.shipped_at as string | null),
     deliveredAt: toDate(o.delivered_at as string | null),
     cancelledAt: toDate(o.cancelled_at as string | null),
-    destination: requiresShipping && address ? [address.line1, address.district, address.city, address.stateProvince].filter(Boolean).join(", ") : null,
+    destination: requiresShipping && o.is_pickup !== true && address ? [address.line1, address.district, address.city, address.stateProvince].filter(Boolean).join(", ") : null,
     items: (items.rows as Record<string, unknown>[]).map((i) => ({
       name: String(i.name_snapshot),
       variantOptions: (i.variant_options_snapshot as Record<string, string> | null) ?? null,

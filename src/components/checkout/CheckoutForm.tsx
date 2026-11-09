@@ -16,6 +16,8 @@ import { cancelPendingOrderAction, resumePendingOrderAction, startPaymentAction,
 export type CheckoutFormProps = {
   /** shipping = hay productos físicos (dirección de entrega). billing = pedido solo digital (dirección de facturación, sin entrega). */
   mode: "shipping" | "billing";
+  /** Retiro en persona: se pide la dirección de facturación (no hay entrega) y se avisa al servidor con `entrega=retiro`. */
+  pickup?: boolean;
   province: string;
   city: string;
   postalCode: string;
@@ -23,13 +25,14 @@ export type CheckoutFormProps = {
   defaults: { name: string; email: string };
 };
 
-export function CheckoutForm({ mode, province, city, postalCode, seenTotal, defaults }: CheckoutFormProps) {
+export function CheckoutForm({ mode, pickup = false, province, city, postalCode, seenTotal, defaults }: CheckoutFormProps) {
   const [state, action, pending] = useActionState(startPaymentAction, null);
   const errors = state?.errors ?? {};
   return (
     <form action={action} className="relative space-y-5 rounded-3xl border border-celeste p-5 sm:p-6">
       <h2 className="font-display text-xl font-bold text-navy">{mode === "billing" ? "Tus datos y la dirección de facturación" : "Tus datos y la dirección exacta"}</h2>
-      {mode === "billing" && <p className="text-sm text-ink/70">No enviamos nada físico: la pasarela de pago solo nos pide una dirección de facturación.</p>}
+      {mode === "billing" && <p className="text-sm text-ink/70">{pickup ? "Vas a retirar tu pedido en persona: la pasarela de pago solo nos pide una dirección de facturación." : "No enviamos nada físico: la pasarela de pago solo nos pide una dirección de facturación."}</p>}
+      {pickup && <input type="hidden" name="entrega" value="retiro" />}
       {state?.message && <Notice tone="error">{state.message}</Notice>}
       <div aria-hidden="true" className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
         <label>No completar<input name="website" tabIndex={-1} autoComplete="off" /></label>
@@ -56,7 +59,7 @@ export function CheckoutForm({ mode, province, city, postalCode, seenTotal, defa
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Nombre y apellido" error={errors.name}><input name="name" autoComplete="name" required maxLength={120} defaultValue={defaults.name} className={inputClass} /></Field>
         <Field label="Correo electrónico" error={errors.email} hint="Acá te enviamos la confirmación."><input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={defaults.email} className={inputClass} /></Field>
-        <Field label="Teléfono" error={errors.phone} hint={mode === "billing" ? "Para contactarte si hay un problema con el pago." : "Para coordinar la entrega."}><input name="phone" type="tel" autoComplete="tel" required maxLength={20} className={inputClass} /></Field>
+        <Field label="Teléfono" error={errors.phone} hint={pickup ? "Para coordinar el retiro de tu pedido." : mode === "billing" ? "Para contactarte si hay un problema con el pago." : "Para coordinar la entrega."}><input name="phone" type="tel" autoComplete="tel" required maxLength={20} className={inputClass} /></Field>
         <Field label="Distrito" error={errors.district}><input name="district" required maxLength={80} className={inputClass} /></Field>
       </div>
       <Field label={mode === "billing" ? "Dirección de facturación" : "Dirección exacta"} error={errors.line1}><input name="line1" autoComplete="address-line1" required maxLength={200} className={inputClass} /></Field>

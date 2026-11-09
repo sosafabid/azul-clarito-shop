@@ -110,6 +110,10 @@ export type CheckoutTotals = {
     /** El método nacional (nombre y descripción editables en el panel), exista o no tarifa para el destino. */
     method: { id: string; code: string; name: string; description: string | null; type: ShippingType } | null;
     options: ShippingOption[];
+    /** "Retiro en persona" si hay un método de retiro activo (se ofrece aunque falte la provincia); `null` si no se ofrece. */
+    pickup: ShippingOption | null;
+    /** Lo que la clienta eligió: entrega a domicilio (por defecto) o retiro en persona. */
+    choice: "DELIVERY" | "PICKUP";
     selected: ShippingOption | null;
     amount: number | null;
     selectionInvalid: boolean;
@@ -131,6 +135,16 @@ export function pickNationalMethod(methods: readonly MethodInput[]): MethodInput
   return [...methods].filter((m) => m.type === "DELIVERY").sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))[0] ?? null;
 }
 
+/** El método de retiro en persona que se ofrece: el primero ACTIVO de tipo retiro, por prioridad y luego por nombre. */
+export function pickPickupMethod(methods: readonly MethodInput[]): MethodInput | null {
+  return [...methods].filter((m) => m.type === "PICKUP").sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))[0] ?? null;
+}
+
+/** ¿Este pedido se retira en persona? (Se lee del snapshot del pedido; no necesita columna nueva.) */
+export function isPickupSnapshot(snapshot: PricingSnapshot | null | undefined): boolean {
+  return snapshot?.shipping.type === "PICKUP";
+}
+
 export function computeTotals(input: {
   currency: string;
   lines: readonly TotalsLineInput[];
@@ -139,6 +153,8 @@ export function computeTotals(input: {
   methods: readonly MethodInput[];
   /** Opcional: el método que pidió el navegador. Si no es el nacional se rechaza; si es `null`, se aplica el nacional. */
   selectedMethodId?: string | null;
+  /** Entrega a domicilio (por defecto) o retiro en persona. Solo cuenta si hay un método de retiro activo. */
+  choice?: "DELIVERY" | "PICKUP";
   now?: Date;
 }): CheckoutTotals {
   const { currency, tax, destination } = input;
@@ -174,25 +190,35 @@ export function computeTotals(input: {
   // lo que ve ni lo que paga la clienta.
   const national = pickNationalMethod(input.methods);
   const unsupportedCountry = destination !== null && destination.country.toUpperCase() !== STORE_COUNTRY;
-  let options: ShippingOption[] = [];
+  const options: ShippingOption[] = [];
   if (shippingRequired && destination && !unsupportedCountry && national) {
     const resolved = resolveRate(national.rates, destination, physicalSubtotal, currency);
     if (resolved) {
-      options = [{ methodId: national.id, code: national.code, name: national.name, description: national.description, type: national.type, rateId: resolved.rate.id, amount: resolved.amount, free: resolved.free, estimatedDaysMin: national.estimatedDaysMin, estimatedDaysMax: national.estimatedDaysMax }];
+      options.push({ methodId: national.id, code: national.code, name: national.name, description: national.description, type: national.type, rateId: resolved.rate.id, amount: resolved.amount, free: resolved.free, estimatedDaysMin: national.estimatedDaysMin, estimatedDaysMax: national.estimatedDaysMax });
     }
   }
+  // Retiro en persona: no necesita dirección de entrega. Cuesta lo que diga una tarifa "todo el país" del método; sin tarifa, ₡0.
+  const pickupMethod = pickPickupMethod(input.methods);
+  let pickup: ShippingOption | null = null;
+  if (shippingRequired && pickupMethod) {
+    const resolved = resolveRate(pickupMethod.rates, { country: STORE_COUNTRY, province: null, city: null, postalCode: null }, physicalSubtotal, currency);
+    pickup = { methodId: pickupMethod.id, code: pickupMethod.code, name: pickupMethod.name, description: pickupMethod.description, type: pickupMethod.type, rateId: resolved?.rate.id ?? "", amount: resolved?.amount ?? 0, free: (resolved?.amount ?? 0) === 0, estimatedDaysMin: pickupMethod.estimatedDaysMin, estimatedDaysMax: pickupMethod.estimatedDaysMax };
+    options.push(pickup);
+  }
   const requested = input.selectedMethodId ?? null;
-  const selected = options.length === 1 && (requested === null || requested === options[0].methodId) ? options[0] : null;
-  const state: ShippingState = !shippingRequired ? "not_required" : unsupportedCountry ? "unsupported_country" : !destination ? "needs_destination" : selected ? "selected" : "not_configured";
-  const selectionInvalid = requested !== null && options.length === 1 && requested !== options[0].methodId;
+  // Sin método de entrega a domicilio configurado, el retiro es lo único que se puede elegir.
+  const choice: "DELIVERY" | "PICKUP" = pickup && (input.choice === "PICKUP" || !national) ? "PICKUP" : "DELIVERY";
+  const selected = requested !== null ? (options.find((o) => o.methodId === requested) ?? null) : choice === "PICKUP" ? pickup : (options.find((o) => o.type === "DELIVERY") ?? null);
+  const state: ShippingState = !shippingRequired ? "not_required" : selected ? "selected" : unsupportedCountry ? "unsupported_country" : !destination ? "needs_destination" : "not_configured";
+  const selectionInvalid = requested !== null && selected === null;
 
   const shippingAmount = !shippingRequired ? 0 : selected ? selected.amount : null;
   const total = blockers.length === 0 && shippingAmount !== null ? totalBeforeShipping + shippingAmount : null;
 
   const shippingSnapshot: PricingSnapshot["shipping"] | null = !shippingRequired
     ? { required: false, methodId: null, code: "digital", name: "Entrega digital", type: null, rateId: null, amount: 0, freeApplied: false, destination, physicalSubtotal: 0 }
-    : selected && destination
-      ? { required: true, methodId: selected.methodId, code: selected.code, name: selected.name, type: selected.type, rateId: selected.rateId, amount: selected.amount, freeApplied: selected.free, destination, physicalSubtotal }
+    : selected
+      ? { required: true, methodId: selected.methodId, code: selected.code, name: selected.name, type: selected.type, rateId: selected.rateId || null, amount: selected.amount, freeApplied: selected.free && selected.type !== "PICKUP", destination, physicalSubtotal }
       : null;
 
   const snapshot: PricingSnapshot | null =
@@ -218,6 +244,8 @@ export function computeTotals(input: {
       state,
       method: national ? { id: national.id, code: national.code, name: national.name, description: national.description, type: national.type } : null,
       options,
+      pickup,
+      choice,
       selected,
       amount: shippingAmount,
       selectionInvalid,

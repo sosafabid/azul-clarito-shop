@@ -21,6 +21,8 @@ export type OrderSummaryEmailData = OrderEmailData & {
   statusUrl?: string | null;
   /** false = pedido solo digital (sin envío). Ausente = true (pedidos anteriores a los productos digitales). */
   requiresShipping?: boolean;
+  /** El pedido se retira en persona (no hay dirección de entrega). */
+  pickup?: boolean;
   /** El pedido incluye al menos un producto digital. */
   hasDigital?: boolean;
 };

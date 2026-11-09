@@ -57,6 +57,7 @@ export async function placeOrder(
     owner: input.owner,
     destination: { country: STORE_COUNTRY, province: form.province, city: form.city, postalCode: form.postalCode },
     shippingMethodId: null,
+    choice: form.pickup ? "PICKUP" : "DELIVERY",
   });
   if (totals.blockers.length > 0) return fail("empty_or_blocked", totals.blockers.map((b) => b.message).join(" "));
   // Pedido solo digital: no hay envío que configurar. Si hay algo físico, tiene que haber tarifa para el destino.

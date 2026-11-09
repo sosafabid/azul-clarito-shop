@@ -216,12 +216,12 @@ export function renderOrderReceived(data: EmailEventMap["order_received"], baseU
     paragraphs: [
       `${escapeHtml(intro)} Estamos esperando la confirmación del pago: <strong>todavía no hemos confirmado ningún cobro</strong>. Apenas se confirme, te avisamos por acá.`,
       orderLinesHtml(data),
-      shipped ? `Destino de entrega: ${escapeHtml(data.destination)}.` : "Tu pedido es digital: no tiene envío. Los enlaces de descarga llegan apenas se confirme el pago.",
+      shipped ? (data.pickup ? "Lo vas a retirar en persona: cuando esté listo te contactamos para coordinar el retiro." : `Destino de entrega: ${escapeHtml(data.destination)}.`) : "Tu pedido es digital: no tiene envío. Los enlaces de descarga llegan apenas se confirme el pago.",
     ],
     button: data.statusUrl ? { label: "Ver el estado de mi pedido", url: data.statusUrl } : undefined,
     notes: [contactNote()],
   });
-  const text = plain([intro, "Estamos esperando la confirmación del pago: todavía no hemos confirmado ningún cobro. Apenas se confirme, te avisamos.", orderLinesText(data), shipped ? `Destino de entrega: ${data.destination}.` : "Tu pedido es digital: no tiene envío. Los enlaces de descarga llegan apenas se confirme el pago.", data.statusUrl ? `Estado del pedido: ${data.statusUrl}` : undefined, contactNote()]);
+  const text = plain([intro, "Estamos esperando la confirmación del pago: todavía no hemos confirmado ningún cobro. Apenas se confirme, te avisamos.", orderLinesText(data), shipped ? (data.pickup ? "Lo vas a retirar en persona: cuando esté listo te contactamos para coordinar el retiro." : `Destino de entrega: ${data.destination}.`) : "Tu pedido es digital: no tiene envío. Los enlaces de descarga llegan apenas se confirme el pago.", data.statusUrl ? `Estado del pedido: ${data.statusUrl}` : undefined, contactNote()]);
   return { subject, html, text };
 }
 
@@ -237,13 +237,13 @@ export function renderPaymentConfirmed(data: EmailEventMap["payment_confirmed"],
     paragraphs: [
       `${escapeHtml(intro)} Confirmamos el pago de tu pedido <strong>${escapeHtml(data.orderNumber)}</strong>.${shipped ? " Ya estamos preparando tus cosas con mucho cariño." : ""}`,
       orderLinesHtml(data),
-      ...(shipped ? [`Lo enviamos a: ${escapeHtml(data.destination)}. Cuando salga el paquete te avisamos con los datos de seguimiento.`] : []),
+      ...(shipped ? [data.pickup ? "Retiro en persona: cuando tu pedido esté listo te contactamos para coordinar el día y la hora del retiro." : `Lo enviamos a: ${escapeHtml(data.destination)}. Cuando salga el paquete te avisamos con los datos de seguimiento.`] : []),
       ...(digitalNote ? [escapeHtml(digitalNote)] : []),
     ],
     button: data.statusUrl ? { label: "Ver mi pedido", url: data.statusUrl } : undefined,
     notes: [contactNote()],
   });
-  const text = plain([intro, `Confirmamos el pago de tu pedido ${data.orderNumber}.${shipped ? " Ya estamos preparando tus cosas." : ""}`, orderLinesText(data), shipped ? `Lo enviamos a: ${data.destination}. Cuando salga el paquete te avisamos con los datos de seguimiento.` : undefined, digitalNote ?? undefined, data.statusUrl ? `Ver mi pedido: ${data.statusUrl}` : undefined, contactNote()]);
+  const text = plain([intro, `Confirmamos el pago de tu pedido ${data.orderNumber}.${shipped ? " Ya estamos preparando tus cosas." : ""}`, orderLinesText(data), shipped ? (data.pickup ? "Retiro en persona: cuando tu pedido esté listo te contactamos para coordinar el día y la hora del retiro." : `Lo enviamos a: ${data.destination}. Cuando salga el paquete te avisamos con los datos de seguimiento.`) : undefined, digitalNote ?? undefined, data.statusUrl ? `Ver mi pedido: ${data.statusUrl}` : undefined, contactNote()]);
   return { subject, html, text };
 }
 
@@ -292,13 +292,15 @@ export function renderAdminNewOrder(data: EmailEventMap["admin_new_order"], base
       orderLinesHtml(data),
       data.requiresShipping === false
         ? "Pedido solo digital: no requiere envío. La clienta recibe sus enlaces de descarga por correo y en la página de su pedido."
-        : `Entrega: ${escapeHtml(data.destination)}. Envío manual: preparalo y anotá el seguimiento en el panel.${data.hasDigital ? " Incluye libros digitales (se entregan solos por descarga)." : ""}`,
+        : data.pickup
+          ? `RETIRO EN PERSONA: coordiná el retiro con la clienta (su teléfono está en el pedido del panel).${data.hasDigital ? " Incluye libros digitales (se entregan solos por descarga)." : ""}`
+          : `Entrega: ${escapeHtml(data.destination)}. Envío manual: preparalo y anotá el seguimiento en el panel.${data.hasDigital ? " Incluye libros digitales (se entregan solos por descarga)." : ""}`,
       ...(data.needsReview ? [`<strong>Atención:</strong> este pedido tiene una alerta de pago pendiente de revisar en el panel.`] : []),
     ],
     button: { label: "Abrir el pedido en el panel", url: data.adminUrl },
     notes: [],
   });
-  const text = plain([`Pedido ${data.orderNumber} de ${who}. Pago verificado con el proveedor${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, orderLinesText(data), data.requiresShipping === false ? "Pedido solo digital: no requiere envío." : `Entrega: ${data.destination}.`, data.needsReview ? "ATENCIÓN: este pedido tiene una alerta de pago pendiente de revisar en el panel." : undefined, `Panel: ${data.adminUrl}`]);
+  const text = plain([`Pedido ${data.orderNumber} de ${who}. Pago verificado con el proveedor${data.transactionId ? ` (transacción ${data.transactionId})` : ""}.`, orderLinesText(data), data.requiresShipping === false ? "Pedido solo digital: no requiere envío." : data.pickup ? "RETIRO EN PERSONA: coordiná el retiro con la clienta." : `Entrega: ${data.destination}.`, data.needsReview ? "ATENCIÓN: este pedido tiene una alerta de pago pendiente de revisar en el panel." : undefined, `Panel: ${data.adminUrl}`]);
   return { subject, html, text };
 }
 

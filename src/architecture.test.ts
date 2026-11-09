@@ -358,7 +358,7 @@ describe("checkout, impuestos y envíos", () => {
     const source = stripComments(read(join(SRC, "app/(store)/checkout/page.tsx")));
     const declared = /searchParams: Promise<\{([^}]*)\}>/.exec(source)?.[1] ?? "";
     const names = [...declared.matchAll(/(\w+)\??:/g)].map((m) => m[1]).sort();
-    expect(names).toEqual(["ciudad", "cp", "pais", "provincia"]); // pais solo para RECHAZAR cualquier valor distinto de CR
+    expect(names).toEqual(["ciudad", "cp", "entrega", "pais", "provincia"]); // pais solo para RECHAZAR cualquier valor distinto de CR; entrega = "retiro" o nada (nunca un monto ni un id)
     expect(source).toMatch(/calculateCheckoutTotals\(/);
     expect(source).not.toMatch(/name="(total|subtotal|impuesto|tax|precio|price|envioPrecio|shippingCost)"/i);
   });

@@ -34,7 +34,7 @@ const row = "flex items-baseline justify-between gap-4";
  *  - Con el envío resuelto, aparece el formulario de datos y "Pagar con tarjeta": el servidor crea el pedido pendiente (reservando el
  *    stock) y redirige a la página de pago de Tilopay. Aquí NO hay campos de tarjeta.
  */
-export default async function CheckoutPage({ searchParams }: { searchParams: Promise<{ pais?: string; provincia?: string; ciudad?: string; cp?: string }> }) {
+export default async function CheckoutPage({ searchParams }: { searchParams: Promise<{ pais?: string; provincia?: string; ciudad?: string; cp?: string; entrega?: string }> }) {
   if (!isDatabaseConfigured()) {
     return <ComingSoon title="Finalizar compra" description="El proceso de compra todavía no está disponible." back={{ label: "Volver al carrito", href: routes.cart }} />;
   }
@@ -44,7 +44,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   // Antes de calcular disponibilidad: las reservas VENCIDAS (30 min) se verifican con Tilopay y, si no se pagaron, devuelven su stock.
   // Sin freno: quien está comprando ve la disponibilidad real (verificada con Tilopay) al instante.
   if (isPaymentsEnabled()) await settleExpiredOrders(getDb(), { limit: 5, source: "expiry" }).catch(() => undefined);
-  const { totals, cart } = await calculateCheckoutTotals(getDb(), { owner, destination, shippingMethodId: null });
+  const { totals, cart } = await calculateCheckoutTotals(getDb(), { owner, destination, shippingMethodId: null, choice: params.entrega === "retiro" ? "PICKUP" : "DELIVERY" });
   // Un carrito con un pedido pendiente de pago lo retoma o lo cancela; no se crean pedidos duplicados.
   const pending = owner ? await getPendingOrderForCart(getDb(), owner) : null;
   const session = await getSession();
@@ -71,6 +71,12 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   // Pedido solo digital: sin envío (₡0) ni dirección de entrega. Solo se pide una dirección de FACTURACIÓN (la pasarela la exige).
   const digitalOnly = !shipping.required && cart.lines.length > 0;
   const hasDigital = cart.lines.some((line) => line.fulfillment === "DIGITAL");
+  // Retiro en persona: no hay dirección de entrega ni envío; se pide solo la dirección de FACTURACIÓN (la pasarela la exige).
+  const pickupChosen = shipping.required && shipping.choice === "PICKUP" && shipping.selected?.type === "PICKUP";
+  const deliveryParams = new URLSearchParams();
+  for (const key of ["provincia", "ciudad", "cp"] as const) if (params[key]) deliveryParams.set(key, params[key]);
+  const deliveryHref = deliveryParams.size > 0 ? `${routes.checkout}?${deliveryParams}` : routes.checkout;
+  const pickupHref = `${routes.checkout}?entrega=retiro`;
 
   return (
     <section className="bg-paper py-10 sm:py-14">
@@ -92,6 +98,32 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
             <div className="rounded-3xl border border-celeste p-5 sm:p-6">
               <h2 className="font-display text-xl font-bold text-navy">Entrega digital</h2>
               <p className="mt-2 text-sm leading-relaxed text-ink/75">Tu compra es 100% digital: no hay envío ni costo de envío. Cuando el pago se confirme vas a poder descargar tu PDF desde la página de tu pedido y te lo enviamos también por correo.</p>
+            </div>
+          ) : (
+          <>
+          {shipping.pickup && (
+            <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
+              <legend className="px-2 font-display text-xl font-bold text-navy">¿Cómo querés recibir tu pedido?</legend>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                {method && (
+                  <Link href={deliveryHref} aria-current={!pickupChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", !pickupChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
+                    <span className="block font-display font-bold text-navy">{method.name}</span>
+                    <span className="mt-1 block text-sm text-ink/70">Te lo enviamos a la dirección que indiques.</span>
+                  </Link>
+                )}
+                <Link href={pickupHref} aria-current={pickupChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", pickupChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
+                  <span className="block font-display font-bold text-navy">{shipping.pickup.name}</span>
+                  <span className="mt-1 block text-sm text-ink/70">{shipping.pickup.amount === 0 ? "Sin costo de envío." : `Costo: ${money(shipping.pickup.amount)}.`}</span>
+                </Link>
+              </div>
+            </fieldset>
+          )}
+          {pickupChosen && shipping.selected ? (
+            <div className="rounded-3xl border border-celeste p-5 sm:p-6">
+              <h2 className="font-display text-xl font-bold text-navy">{shipping.selected.name}</h2>
+              {shipping.selected.description && <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-ink/80">{shipping.selected.description}</p>}
+              <p className="mt-3 text-sm text-ink/75">Costo de envío: <strong className="text-navy">{shipping.selected.amount === 0 ? "Gratis" : money(shipping.selected.amount)}</strong>. Cuando tu pedido esté listo te contactamos para coordinar el retiro.</p>
+              {hasDigital && <p className="mt-3 rounded-2xl bg-aqua/15 p-4 text-sm text-navy">Los productos digitales de tu carrito se descargan en línea: no se retiran.</p>}
             </div>
           ) : (
           <form method="get" action={routes.checkout} className="space-y-6">
@@ -141,12 +173,14 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
             <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">Actualizar resumen</button>
           </form>
           )}
+          </>
+          )}
           {pending ? (
             <PendingOrderPanel orderNumber={pending.orderNumber} total={money(pending.total)} />
           ) : !paymentsEnabled ? (
             <Notice tone="warning">El pago en línea no está disponible por el momento. Escribinos y te ayudamos a completar tu compra.</Notice>
-          ) : totals.canProceed && totals.total !== null && digitalOnly ? (
-            <CheckoutForm mode="billing" province="" city="" postalCode="" seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
+          ) : totals.canProceed && totals.total !== null && (digitalOnly || pickupChosen) ? (
+            <CheckoutForm mode="billing" pickup={pickupChosen} province="" city="" postalCode="" seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
           ) : totals.canProceed && totals.total !== null && destination ? (
             <CheckoutForm mode="shipping" province={destination.province ?? ""} city={destination.city ?? ""} postalCode={destination.postalCode ?? ""} seenTotal={totals.total} defaults={{ name: session?.name ?? "", email: session?.email ?? "" }} />
           ) : null}
@@ -177,9 +211,10 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 <dd className="font-semibold">{tax.applied ? money(tax.amount) : "No aplican"}</dd>
               </div>
               <div className={row}>
-                <dt>{digitalOnly ? "Envío" : (method?.name ?? "Envío")}</dt>
+                <dt>{digitalOnly ? "Envío" : pickupChosen ? (shipping.selected?.name ?? "Retiro en persona") : (method?.name ?? "Envío")}</dt>
                 <dd className="max-w-[12rem] text-right font-semibold">
                   {digitalOnly ? `${money(0)} · entrega digital`
+                    : pickupChosen && shipping.selected ? (shipping.selected.amount === 0 ? "Gratis" : money(shipping.selected.amount))
                     : countryProblem ? COUNTRY_ONLY_MESSAGE
                     : !method ? "No hay un método de envío disponible por el momento."
                     : shipping.state === "selected" && shipping.selected ? (shipping.selected.free ? "Gratis" : money(shipping.selected.amount))

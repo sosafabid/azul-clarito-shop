@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeTotals, pickNationalMethod, toOrderAmounts, type MethodInput, type TaxConfig, type TotalsLineInput } from "./checkout";
+import { computeTotals, isPickupSnapshot, pickNationalMethod, toOrderAmounts, type MethodInput, type TaxConfig, type TotalsLineInput } from "./checkout";
 import type { Destination, RateCandidate } from "./shipping";
 import { divideRounded, isTaxable, lineTax, parsePercentToBps } from "./tax";
 
@@ -181,12 +181,61 @@ describe("envío (solo Costa Rica, un único 'Envío nacional')", () => {
     expect(t.shipping.state).toBe("not_configured");
     expect(t.total).toBeNull();
   });
-  it("aunque haya varios métodos, solo se ofrece UNO: el primero de entrega a domicilio por prioridad; el retiro no se ofrece", () => {
-    const pickup = method({ id: "m2", code: "retiro", name: "Retiro", type: "PICKUP", sortOrder: -5 }, [rate({ id: "r2", methodId: "m2", price: 0 })]);
+  it("entrega a domicilio: solo el primer método de entrega por prioridad; el retiro se ofrece aparte y no se elige solo", () => {
+    const pickup = method({ id: "m2", code: "retiro", name: "Retiro", type: "PICKUP", sortOrder: -5 }, []);
     const second = method({ id: "m3", code: "otro", name: "Otro envío", sortOrder: 5 }, [rate({ id: "r3", methodId: "m3", price: 1 })]);
     const t = calc({ methods: [second, pickup, method()], selectedMethodId: null });
-    expect(t.shipping.options.map((o) => o.code)).toEqual(["estandar"]);
+    expect(t.shipping.options.map((o) => o.code)).toEqual(["estandar", "retiro"]);
+    expect(t.shipping.selected?.code).toBe("estandar");
+    expect(t.shipping.choice).toBe("DELIVERY");
     expect(t.total).toBe(12_500);
+  });
+  describe("retiro en persona", () => {
+    const pickup = method({ id: "m2", code: "retiro", name: "Retiro en persona", description: "Limón centro", type: "PICKUP" }, []);
+    it("sin dirección ni tarifa: cuesta ₡0 y el total es el subtotal", () => {
+      const t = calc({ methods: [method(), pickup], selectedMethodId: null, choice: "PICKUP", destination: null });
+      expect(t.shipping.state).toBe("selected");
+      expect(t.shipping.choice).toBe("PICKUP");
+      expect(t.shipping.selected).toMatchObject({ code: "retiro", amount: 0, type: "PICKUP" });
+      expect(t.total).toBe(10_000);
+      expect(t.snapshot?.shipping).toMatchObject({ type: "PICKUP", methodId: "m2", amount: 0, rateId: null, freeApplied: false, destination: null });
+      expect(isPickupSnapshot(t.snapshot)).toBe(true);
+    });
+    it("con impuesto sumado: subtotal + impuesto, sin envío", () => {
+      expect(calc({ tax: tax(), methods: [method(), pickup], selectedMethodId: null, choice: "PICKUP" }).total).toBe(11_000);
+    });
+    it("si hay una tarifa de todo el país en el método de retiro, se cobra", () => {
+      const paid = method({ id: "m2", code: "retiro", type: "PICKUP" }, [rate({ id: "r9", methodId: "m2", price: 500 })]);
+      expect(calc({ methods: [method(), paid], selectedMethodId: null, choice: "PICKUP" }).shipping.amount).toBe(500);
+    });
+    it("sin elegirlo, la entrega a domicilio sigue siendo la opción por defecto", () => {
+      const t = calc({ methods: [method(), pickup], selectedMethodId: null });
+      expect(t.shipping.choice).toBe("DELIVERY");
+      expect(t.shipping.pickup?.code).toBe("retiro");
+      expect(t.total).toBe(12_500);
+    });
+    it("si no hay método de retiro activo, pedirlo no funciona y vuelve a la entrega", () => {
+      const t = calc({ methods: [method()], selectedMethodId: null, choice: "PICKUP" });
+      expect(t.shipping.pickup).toBeNull();
+      expect(t.shipping.choice).toBe("DELIVERY");
+      expect(t.shipping.selected?.code).toBe("estandar");
+    });
+    it("si solo existe el retiro (sin envío nacional), es lo único que se puede elegir", () => {
+      const t = calc({ methods: [pickup], selectedMethodId: null, destination: null });
+      expect(t.shipping.choice).toBe("PICKUP");
+      expect(t.total).toBe(10_000);
+    });
+    it("un pedido solo digital no necesita ni ofrece retiro", () => {
+      const t = calc({ methods: [method(), pickup], selectedMethodId: null, choice: "PICKUP", lines: [line({ fulfillment: "DIGITAL" })] });
+      expect(t.shipping.state).toBe("not_required");
+      expect(t.shipping.pickup).toBeNull();
+      expect(t.total).toBe(10_000);
+    });
+    it("un id de método inventado se rechaza", () => {
+      const t = calc({ methods: [method(), pickup], selectedMethodId: "no-existe" });
+      expect(t.shipping.selectionInvalid).toBe(true);
+      expect(t.total).toBeNull();
+    });
   });
   it("envío gratis al llegar al umbral configurado", () => {
     const m = method({}, [rate({ freeShippingThreshold: 10_000 })]);

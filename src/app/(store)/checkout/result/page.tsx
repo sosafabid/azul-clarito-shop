@@ -88,7 +88,8 @@ export default async function CheckoutResultPage({ searchParams }: { searchParam
             <div className="flex justify-between"><dt>Envío</dt><dd>{!result.requiresShipping ? "No aplica (entrega digital)" : result.shippingTotal === 0 ? "Gratis" : money(result.shippingTotal)}</dd></div>
             <div className="flex justify-between text-base font-bold text-navy"><dt>Total</dt><dd>{money(result.total)}</dd></div>
           </dl>
-          {result.requiresShipping && <p className="mt-3 text-xs text-ink/60">Entrega en: {result.destination}</p>}
+          {result.requiresShipping && !result.pickup && <p className="mt-3 text-xs text-ink/60">Entrega en: {result.destination}</p>}
+          {result.pickup && <p className="mt-3 text-xs text-ink/60">Retiro en persona: te contactamos para coordinar el día y la hora.</p>}
         </div>
 
         {(view === "verifying" || view === "failed") && (
