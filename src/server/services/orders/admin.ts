@@ -60,6 +60,33 @@ export async function getAdminOrder(db: Database, id: string) {
   return { order, items, payments: paymentRows, events, reservations, notifications };
 }
 
+/** Lo que hace falta saber de un pedido para el envío: su estado y si es retiro en persona (sin guía ni correo de envío). */
+export async function getShipmentFlags(db: Database, orderId: string): Promise<{ status: OrderStatus; requiresShipping: boolean; pickup: boolean } | null> {
+  const res = await db.execute(sql`select status::text as status, requires_shipping, (pricing_snapshot -> 'shipping' ->> 'type') = 'PICKUP' as is_pickup from orders where id = ${orderId}::uuid limit 1`);
+  const row = (res.rows as Record<string, unknown>[])[0];
+  return row ? { status: row.status as OrderStatus, requiresShipping: row.requires_shipping === true, pickup: row.is_pickup === true } : null;
+}
+
+/** Corrige courier / guía / enlace de un pedido que YA está enviado (sin cambiar su estado). Solo aplica si sigue en ENVIADO. */
+export async function updateTracking(
+  db: Database,
+  input: { orderId: string; carrier: string | null; trackingNumber: string; trackingUrl: string | null; actor: AuditActor },
+): Promise<boolean> {
+  const audit = toAuditRow(input.actor, { action: "order_tracking_updated", entityType: "order", entityId: input.orderId, metadata: { hasUrl: Boolean(input.trackingUrl) } });
+  const result = await db.execute(sql`
+    with upd as (
+      update orders
+         set carrier = ${input.carrier}::text, tracking_number = ${input.trackingNumber}::text, tracking_url = ${input.trackingUrl}::text, updated_at = now()
+       where id = ${input.orderId}::uuid and status = 'SHIPPED'::order_status
+      returning id
+    )
+    insert into audit_logs (actor_user_id, action, entity_type, entity_id, metadata)
+    select ${audit.actorUserId ?? null}::uuid, ${audit.action}::text, ${audit.entityType}::text, ${audit.entityId ?? null}::text, ${JSON.stringify(audit.metadata)}::jsonb from upd
+    returning id
+  `);
+  return result.rows.length > 0;
+}
+
 export type FulfillmentInput = { next: OrderStatus; carrier: string | null; trackingNumber: string | null; trackingUrl: string | null };
 
 export const FULFILLMENT_TARGETS = ["PREPARING", "PACKED", "SHIPPED", "DELIVERED"] as const satisfies readonly OrderStatus[];

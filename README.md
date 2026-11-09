@@ -50,7 +50,7 @@ defecto **la tienda ya funciona en tu computadora** (no pide base de datos todav
 | `DIGITAL_BLOB_READ_WRITE_TOKEN` | Almacén **privado** de los PDF de libros digitales (Vercel Blob, acceso Private). Secreto de servidor | Para subir y vender productos digitales (ver `docs/PRODUCTOS-DIGITALES.md`) |
 | `RESEND_API_KEY` | Clave de Resend. **Solo servidor** | Para enviar correos (verificación y restablecimiento) |
 | `RESEND_FROM_EMAIL` | Remitente, p. ej. `Azul Clarito <cuenta@TU-DOMINIO-VERIFICADO>`. El dominio **debe estar verificado en Resend** | Para enviar correos (`EMAIL_FROM` se sigue aceptando como alternativa) |
-| `ADMIN_NOTIFY_EMAIL` | Aviso de pedidos nuevos a management | Cuando haya pedidos |
+| `ADMIN_NOTIFY_EMAIL` | Correos EXTRA (coma) para el aviso de venta; fsosa@azulclaritocr.com siempre lo recibe | Cuando haya pedidos |
 | `TILOPAY_API_USER`, `TILOPAY_API_PASSWORD`, `TILOPAY_API_KEY` | Credenciales de la API de Tilopay. **Solo servidor, secretas** | Para cobrar. Sin ellas el checkout muestra "pago no disponible" |
 | `TILOPAY_MERCHANT_ID` | Id de comercio, si Tilopay lo exige en `consult` | Opcional |
 | `TILOPAY_MODE` | `sandbox` (por defecto). Un valor desconocido deshabilita los pagos | Opcional |

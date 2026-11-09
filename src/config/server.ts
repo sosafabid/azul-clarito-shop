@@ -1,4 +1,5 @@
 import "server-only";
+import { parseNotifyRecipients } from "@/domain/notify-recipients";
 import { resolveAppBaseUrl } from "@/domain/app-url";
 import { optionalEnv } from "@/server/env";
 
@@ -29,9 +30,13 @@ export const serverConfig = {
     get from() {
       return optionalEnv("RESEND_FROM_EMAIL") ?? optionalEnv("EMAIL_FROM");
     },
-    /** Dónde avisar de pedidos nuevos a management. */
-    get adminNotifyTo() {
-      return optionalEnv("ADMIN_NOTIFY_EMAIL");
+    /**
+     * Dónde avisar de ventas a management. SIEMPRE incluye el correo de Azul Clarito (`ALWAYS_NOTIFY_EMAIL`); `ADMIN_NOTIFY_EMAIL` puede
+     * sumar más direcciones (separadas por coma). Nunca queda vacío: un aviso de venta no se pierde por una variable sin definir.
+     */
+    get adminNotifyTo(): string[] {
+      return parseNotifyRecipients(optionalEnv("ADMIN_NOTIFY_EMAIL"));
     },
   },
 } as const;
+

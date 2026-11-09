@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { Notice } from "@/components/ui/Notice";
-import { cancelPendingOrderAdminAction, reconcileNowAction, resolvePaymentReviewAction, updateFulfillmentAction, verifyOrderPaymentAction, type OrderActionState } from "@/server/actions/orders";
+import { cancelPendingOrderAdminAction, reconcileNowAction, resolvePaymentReviewAction, updateFulfillmentAction, updateTrackingAction, verifyOrderPaymentAction, type OrderActionState } from "@/server/actions/orders";
 import { Fld, dangerButton, ghostButton, inputClass, primaryButton } from "./settings-ui";
 
 function Result({ state }: { state: OrderActionState }) {
@@ -54,6 +54,22 @@ export function FulfillmentForm({ orderId, current, next, carrier, trackingNumbe
         <Fld label="Enlace de seguimiento"><input name="trackingUrl" defaultValue={trackingUrl} maxLength={500} placeholder="https://" className={inputClass} /></Fld>
       </div>
       <button type="submit" disabled={pending} className={primaryButton}>{pending ? "Guardando…" : (LABELS[next] ?? "Actualizar")}</button>
+      <Result state={state} />
+    </form>
+  );
+}
+
+export function TrackingUpdateForm({ orderId, carrier, trackingNumber, trackingUrl }: { orderId: string; carrier: string; trackingNumber: string; trackingUrl: string }) {
+  const [state, action, pending] = useActionState(updateTrackingAction.bind(null, orderId), null);
+  return (
+    <form action={action} className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Fld label="Courier"><input name="carrier" defaultValue={carrier} maxLength={80} className={inputClass} /></Fld>
+        <Fld label="Número de guía"><input name="trackingNumber" defaultValue={trackingNumber} required maxLength={120} className={inputClass} /></Fld>
+        <Fld label="Enlace de seguimiento"><input name="trackingUrl" defaultValue={trackingUrl} maxLength={500} placeholder="https://" className={inputClass} /></Fld>
+      </div>
+      <button type="submit" disabled={pending} className={primaryButton}>{pending ? "Guardando…" : "Actualizar guía y avisar al cliente"}</button>
+      <p className="text-[11px] text-ink/60">Se envía un correo al cliente con la guía. Si no cambiaste nada, no se repite el correo.</p>
       <Result state={state} />
     </form>
   );

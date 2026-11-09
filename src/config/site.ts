@@ -26,7 +26,7 @@ export const siteConfig = {
   currency: DEFAULT_CURRENCY,
 
   contact: {
-    email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "mariamayaceleste@gmail.com",
+    email: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "tienda@azulclaritocr.com",
   },
 
   /** Redes oficiales (las mismas del sitio principal). */

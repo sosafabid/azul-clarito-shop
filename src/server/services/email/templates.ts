@@ -280,6 +280,27 @@ export function renderOrderCancelled(data: EmailEventMap["order_cancelled"], bas
   return { subject, html, text };
 }
 
+export function renderOrderShipped(data: EmailEventMap["order_shipped"], baseUrl: string): RenderedEmail {
+  const subject = `Tu pedido ${data.orderNumber} ya va en camino — Azul Clarito`;
+  const intro = `${greeting(data.customerName)}, ¡tu pedido ${data.orderNumber} ya salió!`;
+  const courier = (data.carrier ?? "").trim();
+  const details = `${courier ? `Servicio de envío: ${courier}. ` : ""}Número de guía: ${data.trackingNumber}.`;
+  const html = layout({
+    baseUrl,
+    preheader: `Número de guía: ${data.trackingNumber}`,
+    title: "Tu pedido va en camino",
+    paragraphs: [
+      `${escapeHtml(intro)} Lo entregamos para su envío${courier ? ` con <strong>${escapeHtml(courier)}</strong>` : ""}.`,
+      `Número de guía: <strong style="font-size:18px;letter-spacing:0.5px;">${escapeHtml(data.trackingNumber)}</strong>`,
+      "Con ese número podés consultar el estado de tu paquete. Si más adelante corregimos la guía, te avisamos con otro correo.",
+    ],
+    button: data.trackingUrl ? { label: "Seguir mi paquete", url: data.trackingUrl } : undefined,
+    notes: [contactNote()],
+  });
+  const text = plain([intro, details, data.trackingUrl ? `Seguimiento: ${data.trackingUrl}` : undefined, "Si más adelante corregimos la guía, te avisamos con otro correo.", contactNote()]);
+  return { subject, html, text };
+}
+
 export function renderAdminNewOrder(data: EmailEventMap["admin_new_order"], baseUrl: string): RenderedEmail {
   const subject = `${data.needsReview ? "⚠ REVISAR · " : ""}Venta confirmada ${data.orderNumber} — ${formatMoney(data.total, data.currency)}`;
   const who = `${(data.customerName ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim() || "(sin nombre)"} <${data.customerEmail}>`;

@@ -42,7 +42,7 @@ export type EmailEventMap = {
   payment_failed: OrderSummaryEmailData;
   order_preparing: OrderEmailData;
   order_shipped: OrderEmailData & {
-    carrier: string;
+    carrier?: string | null;
     trackingNumber: string;
     trackingUrl?: string | null;
   };
@@ -71,6 +71,6 @@ export type EmailEvent = keyof EmailEventMap;
 
 export type EmailRequest<E extends EmailEvent = EmailEvent> = {
   event: E;
-  to: string;
+  to: string | readonly string[];
   data: EmailEventMap[E];
 };

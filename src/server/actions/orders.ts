@@ -8,7 +8,9 @@ import { isUuid } from "@/domain/ids";
 import { ORDER_STATUSES, type OrderStatus } from "@/domain/order-status";
 import { requirePermission } from "@/server/auth";
 import { auditInsert, resolveAuditActor } from "@/server/services/audit";
-import { FULFILLMENT_TARGETS, advanceFulfillment } from "@/server/services/orders/admin";
+import { parseShipment, shipmentEmailKey } from "@/domain/shipment";
+import { FULFILLMENT_TARGETS, advanceFulfillment, getShipmentFlags, updateTracking } from "@/server/services/orders/admin";
+import { sendOrderEmail } from "@/server/services/orders/notify";
 import { resolvePaymentReview } from "@/server/services/payments/lifecycle";
 import { cancelOrderSafely, reconcilePayments } from "@/server/services/payments/reconcile";
 import { notifyVerifyResult, verifyPayment } from "@/server/services/payments/verify";
@@ -65,23 +67,49 @@ export async function updateFulfillmentAction(orderId: string, _previous: OrderA
   const next = String(formData.get("next") ?? "") as OrderStatus;
   const expected = String(formData.get("expected") ?? "") as OrderStatus;
   if (!(FULFILLMENT_TARGETS as readonly string[]).includes(next) || !(ORDER_STATUSES as readonly string[]).includes(expected)) return { ok: false, message: "Estado no válido." };
-  const trackingUrl = clean(formData.get("trackingUrl"), 500);
-  if (trackingUrl !== "" && !/^https?:\/\//i.test(trackingUrl)) return { ok: false, message: "El enlace de seguimiento debe empezar con http:// o https://." };
+  const db = getDb();
+  const flags = await getShipmentFlags(db, orderId);
+  if (!flags) return { ok: false, message: "Pedido no encontrado." };
+  // Retiro en persona o pedido solo digital: no hay paquete, así que no se exige guía ni se manda el correo de envío.
+  const ships = flags.requiresShipping && !flags.pickup;
+  const shipment = parseShipment({ carrier: String(formData.get("carrier") ?? ""), trackingNumber: String(formData.get("trackingNumber") ?? ""), trackingUrl: String(formData.get("trackingUrl") ?? "") }, { requireTracking: next === "SHIPPED" && ships });
+  if (!shipment.ok) return { ok: false, message: shipment.message };
   try {
-    const changed = await advanceFulfillment(getDb(), {
-      orderId,
-      expected,
-      next,
-      carrier: clean(formData.get("carrier"), 80) || null,
-      trackingNumber: clean(formData.get("trackingNumber"), 120) || null,
-      trackingUrl: trackingUrl || null,
-      actor: resolveAuditActor(session),
-    });
+    const changed = await advanceFulfillment(db, { orderId, expected, next, ...shipment.value, actor: resolveAuditActor(session) });
     revalidatePath(routes.adminOrder(orderId));
-    return changed ? { ok: true, message: "Pedido actualizado." } : { ok: false, message: "El pedido cambió mientras lo editabas. Recargá la página." };
+    if (!changed) return { ok: false, message: "El pedido cambió mientras lo editabas. Recargá la página." };
+    // Al marcarlo ENVIADO le llega al cliente el correo con la guía (una sola vez por guía; si falla, la conciliación lo reintenta).
+    if (next === "SHIPPED" && ships) {
+      const key = shipmentEmailKey(shipment.value);
+      after(() => sendOrderEmail(db, { orderId, event: "order_shipped", key }));
+      return { ok: true, message: "Pedido marcado como enviado. Le enviamos al cliente un correo con el número de guía." };
+    }
+    return { ok: true, message: "Pedido actualizado." };
   } catch {
     return { ok: false, message: "Ese cambio de estado no está permitido." };
   }
+}
+
+/** Corrige la guía de un pedido ya enviado y le avisa al cliente con un correo nuevo (solo si algo cambió). */
+export async function updateTrackingAction(orderId: string, _previous: OrderActionState, formData: FormData): Promise<OrderActionState> {
+  const session = await requirePermission("orders:fulfill");
+  if (!isDatabaseConfigured()) return NO_DB;
+  if (!isUuid(orderId)) return { ok: false, message: "Pedido no válido." };
+  const db = getDb();
+  const flags = await getShipmentFlags(db, orderId);
+  if (!flags) return { ok: false, message: "Pedido no encontrado." };
+  if (flags.pickup || !flags.requiresShipping) return { ok: false, message: "Este pedido no lleva envío (retiro en persona o digital), así que no tiene guía." };
+  if (flags.status !== "SHIPPED") return { ok: false, message: "Solo se puede cambiar la guía de un pedido que está en estado enviado." };
+  const shipment = parseShipment({ carrier: String(formData.get("carrier") ?? ""), trackingNumber: String(formData.get("trackingNumber") ?? ""), trackingUrl: String(formData.get("trackingUrl") ?? "") }, { requireTracking: true });
+  if (!shipment.ok) return { ok: false, message: shipment.message };
+  const changed = await updateTracking(db, { orderId, carrier: shipment.value.carrier, trackingNumber: shipment.value.trackingNumber as string, trackingUrl: shipment.value.trackingUrl, actor: resolveAuditActor(session) });
+  revalidatePath(routes.adminOrder(orderId));
+  if (!changed) return { ok: false, message: "El pedido cambió mientras lo editabas. Recargá la página." };
+  const key = shipmentEmailKey(shipment.value);
+  const outcome = await sendOrderEmail(db, { orderId, event: "order_shipped", key });
+  if (outcome === "sent") return { ok: true, message: "Guía actualizada y correo enviado al cliente." };
+  if (outcome === "skipped") return { ok: true, message: "Guía guardada. Esa misma guía ya se le había enviado al cliente, así que no se repitió el correo." };
+  return { ok: true, message: "Guía guardada, pero el correo al cliente no se pudo enviar ahora. Se reintentará solo; también podés volver a guardar en unos minutos." };
 }
 
 export async function reconcileNowAction(): Promise<OrderActionState> {

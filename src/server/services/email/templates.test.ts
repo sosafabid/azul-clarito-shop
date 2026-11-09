@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, renderEmailVerification, renderPasswordChanged, renderPasswordReset } from "./templates";
+import { escapeHtml, renderEmailVerification, renderOrderShipped, renderPasswordChanged, renderPasswordReset } from "./templates";
 
 const BASE = "https://shop.azulclaritocr.com";
 const URL_ = `${BASE}/reset-password?token=abc_DEF-123`;
@@ -66,5 +66,22 @@ describe("correo de invitación a STAFF", () => {
     expect(mail.html).toContain("72 horas");
     expect(mail.html).not.toContain("<b>Fabi</b>");
     expect(mail.html).not.toMatch(/contraseña:\s*\S+/i);
+  });
+});
+
+describe("correo de pedido enviado", () => {
+  const base = { orderNumber: "AC-2026-000011", customerName: "María", currency: "CRC", items: [], total: 0 } as never;
+  it("incluye guía, courier y botón de seguimiento", () => {
+    const mail = renderOrderShipped({ ...(base as object), carrier: "Correos de Costa Rica", trackingNumber: "CR123456", trackingUrl: "https://example.com/t/CR123456" } as never, BASE);
+    expect(mail.subject).toContain("AC-2026-000011");
+    expect(mail.html).toContain("CR123456");
+    expect(mail.html).toContain("Correos de Costa Rica");
+    expect(mail.html).toContain('href="https://example.com/t/CR123456"');
+    expect(mail.text).toContain("CR123456");
+  });
+  it("sin enlace no muestra botón y escapa el HTML de la guía", () => {
+    const mail = renderOrderShipped({ ...(base as object), trackingNumber: "<b>X</b>" } as never, BASE);
+    expect(mail.html).not.toContain("Seguir mi paquete");
+    expect(mail.html).not.toContain("<b>X</b>");
   });
 });

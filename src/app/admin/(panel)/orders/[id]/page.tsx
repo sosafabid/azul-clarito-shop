@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CancelPendingButton, FulfillmentForm, ResolveReviewForm, VerifyPaymentButton } from "@/components/admin/OrderActions";
+import { CancelPendingButton, FulfillmentForm, ResolveReviewForm, TrackingUpdateForm, VerifyPaymentButton } from "@/components/admin/OrderActions";
 import { DatabaseNotice, Notice } from "@/components/admin/Notice";
 import { ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS } from "@/components/admin/order-labels";
 import { card } from "@/components/admin/settings-ui";
@@ -131,7 +131,14 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
           <div className="mt-4 space-y-4">
             {nextStates.map((next) => <FulfillmentForm key={next} orderId={order.id} current={order.status} next={next} carrier={order.carrier ?? ""} trackingNumber={order.trackingNumber ?? ""} trackingUrl={order.trackingUrl ?? ""} />)}
           </div>
-        ) : order.status === "PENDING" ? <p className="mt-3 text-sm text-ink/70">El envío se habilita cuando el pago esté confirmado.</p> : null}
+        ) : null}
+        {canManage && order.status === "SHIPPED" && (
+          <div className="mt-4 border-t border-celeste/50 pt-4">
+            <h3 className="text-sm font-bold">Corregir o agregar la guía</h3>
+            <div className="mt-2"><TrackingUpdateForm orderId={order.id} carrier={order.carrier ?? ""} trackingNumber={order.trackingNumber ?? ""} trackingUrl={order.trackingUrl ?? ""} /></div>
+          </div>
+        )}
+        {!(canManage && nextStates.length > 0) && order.status === "PENDING" ? <p className="mt-3 text-sm text-ink/70">El envío se habilita cuando el pago esté confirmado.</p> : null}
       </section>
 
       <section className={card}>

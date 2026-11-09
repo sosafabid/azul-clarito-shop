@@ -9,6 +9,7 @@ import {
   renderDigitalDownloads,
   renderOrderCancelled,
   renderOrderReceived,
+  renderOrderShipped,
   renderPasswordChanged,
   renderPasswordReset,
   renderPaymentConfirmed,
@@ -22,7 +23,7 @@ import {
  * La clave (`RESEND_API_KEY`) nunca sale de aquí: no se registra en logs ni llega al navegador.
  *
  * Se arman los correos de la cuenta y los de compra (recibido, pago confirmado, pago fallido, cancelado, aviso de venta).
- * Preparación, envío, entrega y reembolso todavía no tienen plantilla (se devuelven como `no_template`).
+ * Preparación, entrega y reembolso todavía no tienen plantilla (se devuelven como `no_template`).
  */
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const TIMEOUT_MS = 10_000;
@@ -49,6 +50,8 @@ export class ResendEmailService implements EmailService {
         return renderPaymentFailed(request.data as never, baseUrl);
       case "order_cancelled":
         return renderOrderCancelled(request.data as never, baseUrl);
+      case "order_shipped":
+        return renderOrderShipped(request.data as never, baseUrl);
       case "digital_delivery":
         return renderDigitalDownloads(request.data as never, baseUrl, "delivery");
       case "digital_recovery":
@@ -74,7 +77,7 @@ export class ResendEmailService implements EmailService {
           "Content-Type": "application/json",
           "Idempotency-Key": randomUUID(),
         },
-        body: JSON.stringify({ from: this.options.from, to: [request.to], subject: email.subject, html: email.html, text: email.text }),
+        body: JSON.stringify({ from: this.options.from, to: typeof request.to === "string" ? [request.to] : [...request.to], subject: email.subject, html: email.html, text: email.text }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
         cache: "no-store",
       });

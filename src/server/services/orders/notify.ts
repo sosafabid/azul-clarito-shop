@@ -19,7 +19,7 @@ import type { OrderSummaryEmailData } from "@/server/services/email/events";
  * Si Resend falla, la fila queda en FAILED (el pago ya está confirmado, el correo NO lo revierte) y la conciliación lo reintenta
  * hasta 5 veces. Un envío que se quedó "en vuelo" (PENDING hace más de 10 minutos) también puede reclamarse de nuevo.
  */
-export type OrderEmailEvent = "order_received" | "payment_confirmed" | "payment_failed" | "order_cancelled" | "admin_new_order" | "admin_payment_review" | "digital_delivery" | "digital_recovery";
+export type OrderEmailEvent = "order_received" | "payment_confirmed" | "payment_failed" | "order_cancelled" | "admin_new_order" | "admin_payment_review" | "order_shipped" | "digital_delivery" | "digital_recovery";
 export const MAX_EMAIL_ATTEMPTS = 5;
 
 async function claim(db: Database, orderId: string, key: string): Promise<boolean> {
@@ -106,10 +106,6 @@ export async function sendOrderEmail(
     let result;
     if (input.event === "admin_new_order") {
       const to = serverConfig.email.adminNotifyTo;
-      if (!to) {
-        await finish(db, input.orderId, key, "admin_notify_email_missing");
-        return "failed";
-      }
       result = await service.send({
         event: "admin_new_order",
         to,
@@ -117,14 +113,22 @@ export async function sendOrderEmail(
       });
     } else if (input.event === "admin_payment_review") {
       const to = serverConfig.email.adminNotifyTo;
-      if (!to) {
-        await finish(db, input.orderId, key, "admin_notify_email_missing");
-        return "failed";
-      }
       result = await service.send({
         event: "admin_payment_review",
         to,
         data: { ...order.summary, customerEmail: order.email, adminUrl: `${serverConfig.appBaseUrl}${routes.adminOrder(input.orderId)}`, transactionId: order.transactionId, reason: order.reviewReason ?? "Cobro aprobado en un pedido que no estaba pendiente." },
+      });
+    } else if (input.event === "order_shipped") {
+      // La guía se lee de la base AHORA (no viaja en la petición): un reintento manda siempre la guía vigente. Sin número de guía no se envía nada.
+      const [ship] = await db.select({ carrier: orders.carrier, trackingNumber: orders.trackingNumber, trackingUrl: orders.trackingUrl }).from(orders).where(eq(orders.id, input.orderId)).limit(1);
+      if (!ship?.trackingNumber) {
+        await finish(db, input.orderId, key, "no_tracking_number");
+        return "failed";
+      }
+      result = await service.send({
+        event: "order_shipped",
+        to: order.email,
+        data: { orderNumber: order.orderNumber, customerName: order.customerName, total: order.summary.total, currency: order.summary.currency, carrier: ship.carrier, trackingNumber: ship.trackingNumber, trackingUrl: ship.trackingUrl },
       });
     } else if (input.event === "digital_delivery" || input.event === "digital_recovery") {
       // Los enlaces se crean AHORA (y solo si el pedido está pagado): nunca viajan guardados en claro. Si el envío se reintenta, se crean otros.
