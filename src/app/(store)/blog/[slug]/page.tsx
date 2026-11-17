@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { PostCover } from "@/components/blog/PostCover";
 import { ArticleBody, type BlogProduct } from "@/components/blog/ArticleBody";
 import { ButtonLink } from "@/components/ui/ButtonLink";
 import { Container } from "@/components/ui/Container";
@@ -15,8 +16,6 @@ import { listPublicProducts } from "@/server/services/catalog/queries";
 
 // Las fotos y nombres de los productos salen de la tienda en cada visita, igual que en /shop.
 export const dynamic = "force-dynamic";
-
-const SOCIAL_IMAGE = "/brand/og-azul-clarito-shop.jpg";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
@@ -40,9 +39,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       publishedTime: post.date,
       authors: [post.author],
       section: post.category,
-      images: [{ url: SOCIAL_IMAGE, width: 1200, height: 630, alt: "Azul Clarito, una tortuga marina entre las olas" }],
+      images: [{ url: post.image.src, width: post.image.width, height: post.image.height, alt: post.image.alt }],
     },
-    twitter: { card: "summary_large_image", title: post.metaTitle, description: post.metaDescription, images: [SOCIAL_IMAGE] },
+    twitter: { card: "summary_large_image", title: post.metaTitle, description: post.metaDescription, images: [post.image.src] },
   };
 }
 
@@ -70,7 +69,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
   const path = routes.blogPost(post.slug);
   const minutes = readingMinutes(post);
   const jsonLd = [
-    buildBlogPostingJsonLd(post, path, { baseUrl: siteConfig.url, imageUrl: `${siteConfig.url}${SOCIAL_IMAGE}`, logoUrl: `${siteConfig.url}/brand/logo-icon.png`, publisherName: siteConfig.name }),
+    buildBlogPostingJsonLd(post, path, { baseUrl: siteConfig.url, imageUrl: `${siteConfig.url}${post.image.src}`, logoUrl: `${siteConfig.url}/brand/logo-icon.png`, publisherName: siteConfig.name }),
     buildBreadcrumbJsonLd(
       [
         { name: "Inicio", path: routes.home },
@@ -107,6 +106,9 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       </header>
 
       <Container size="narrow" className="pb-16 sm:pb-24">
+        <figure className="-mt-2 mb-12 overflow-hidden rounded-3xl border border-celeste shadow-soft">
+          <PostCover post={post} sizes="(min-width: 768px) 768px, 100vw" priority />
+        </figure>
         <nav aria-labelledby="indice-titulo" className="mb-12 rounded-3xl border border-celeste bg-paper p-6">
           <h2 id="indice-titulo" className="font-display text-sm font-bold uppercase tracking-[0.14em] text-navy/60">En este artículo</h2>
           <ol className="mt-3 space-y-2">
@@ -135,6 +137,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
                   <span aria-hidden="true" className="mt-0.5 text-2xl leading-none transition-transform group-open:rotate-45">+</span>
                 </summary>
                 <p className="mt-3 leading-relaxed text-ink/85">{item.answer}</p>
+                {item.link && <p className="mt-3"><Link href={item.link.href} className="font-semibold text-navy underline underline-offset-4">{item.link.label}</Link></p>}
               </details>
             ))}
           </div>

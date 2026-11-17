@@ -6,6 +6,7 @@
 export type BlogBlock =
   | { type: "p"; text: string }
   | { type: "list"; items: string[] }
+  | { type: "bullets"; items: { lead: string; text: string }[] }
   | { type: "faceGuide"; items: { shape: string; text: string }[] }
   | { type: "styleGuide"; items: { name: string; text: string }[] }
   | { type: "tips"; items: { title: string; text: string }[] }
@@ -16,15 +17,15 @@ export type BlogModel = {
   slug: string;
   /** Nombre de respaldo, por si la tienda no responde al cargar el artículo. */
   name: string;
-  /** Descripción visual confirmada del producto (la misma de su ficha). */
-  visual: string;
+  /** Descripción visual confirmada del producto (la misma de su ficha). Opcional. */
+  visual?: string;
   /** Texto editorial; nunca debe afirmar medidas, materiales ni protección UV. */
   text: string;
 };
 
 export type BlogSection = { id: string; title: string; blocks: BlogBlock[] };
 
-export type BlogFaq = { question: string; answer: string };
+export type BlogFaq = { question: string; answer: string; link?: { label: string; href: string } };
 
 export type BlogPost = {
   slug: string;
@@ -36,6 +37,13 @@ export type BlogPost = {
   author: string;
   metaTitle: string;
   metaDescription: string;
+  /**
+   * Imagen de portada OBLIGATORIA (archivo en /public). Se usa igual en la tarjeta del índice, en la cabecera del
+   * artículo y al compartir en redes. `position` (CSS object-position, p. ej. "50% 30%") ajusta el encuadre del recorte 16:9.
+   */
+  image: { src: string; alt: string; width: number; height: number; position?: string };
+  /** Verbo del botón de cada producto ("Ver" por defecto). */
+  modelCtaVerb?: string;
   keywords: string[];
   intro: string[];
   sections: BlogSection[];
@@ -44,6 +52,33 @@ export type BlogPost = {
 };
 
 export const BLOG_AUTHOR = "Azul Clarito";
+
+/** Proporción fija de todas las portadas (tarjeta y cabecera del artículo). */
+export const COVER_ASPECT = 16 / 9;
+
+const COVER_EXTENSIONS = /\.(webp|jpe?g|png|avif)$/i;
+
+/**
+ * Reglas de publicación de un artículo (puras, sin tocar el disco). Devuelve los problemas en español;
+ * vacío = se puede publicar. La existencia del archivo de la portada la comprueba `scripts/check-blog.ts`.
+ * Regla permanente: ningún artículo se publica sin portada con foto y texto alternativo descriptivo.
+ */
+export function validateBlogPost(post: BlogPost): string[] {
+  const issues: string[] = [];
+  const image = post.image as BlogPost["image"] | undefined;
+  if (!image || !image.src) {
+    issues.push("Falta la imagen de portada (image).");
+  } else {
+    if (!image.src.startsWith("/") || !COVER_EXTENSIONS.test(image.src)) issues.push("La portada debe ser un archivo de imagen dentro de /public (ruta que empiece con \"/\" y termine en .webp, .jpg, .png o .avif).");
+    if (!image.alt || image.alt.trim().length < 25) issues.push("La portada necesita un texto alternativo descriptivo (mínimo 25 caracteres).");
+    if (!(image.width > 0) || !(image.height > 0)) issues.push("La portada necesita su ancho y alto reales en píxeles.");
+    else if (image.width / image.height < 1.5) issues.push("La portada debe ser horizontal (como mínimo 3:2) para recortarse bien a 16:9 sin deformarse.");
+    else if (image.width < 800) issues.push("La portada es muy pequeña: usa al menos 800 px de ancho.");
+  }
+  if (!post.slug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(post.slug)) issues.push("El slug no es válido (solo minúsculas, números y guiones).");
+  if (!post.metaTitle || !post.metaDescription) issues.push("Faltan el meta title o la meta description.");
+  return issues;
+}
 
 /** Minutos de lectura aproximados (200 palabras por minuto), mínimo 1. */
 export function readingMinutes(post: BlogPost): number {
@@ -54,12 +89,13 @@ export function readingMinutes(post: BlogPost): number {
       if (block.type === "p") parts.push(block.text);
       else if (block.type === "list") parts.push(...block.items);
       else if (block.type === "faceGuide") parts.push(...block.items.map((i) => `${i.shape} ${i.text}`));
+      else if (block.type === "bullets") parts.push(...block.items.map((i) => `${i.lead} ${i.text}`));
       else if (block.type === "styleGuide") parts.push(...block.items.map((i) => `${i.name} ${i.text}`));
       else if (block.type === "tips") parts.push(...block.items.map((i) => `${i.title} ${i.text}`));
-      else parts.push(...block.items.map((i) => `${i.visual} ${i.text}`));
+      else parts.push(...block.items.map((i) => `${i.visual ?? ""} ${i.text}`));
     }
   }
-  for (const f of post.faq) parts.push(f.question, f.answer);
+  for (const f of post.faq) parts.push(f.question, f.answer, f.link?.label ?? "");
   const words = parts.join(" ").split(/\s+/).filter(Boolean).length;
   return Math.max(1, Math.round(words / 200));
 }

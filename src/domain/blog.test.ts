@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BLOG_POSTS, getBlogPost } from "@/content/blog";
-import { buildBlogPostingJsonLd, buildBreadcrumbJsonLd, formatPostDate, productSlugsOf, readingMinutes, serializeJsonLd } from "./blog";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { ALL_BLOG_POSTS, BLOG_POSTS, getBlogPost } from "@/content/blog";
+import { validateBlogPost, type BlogPost, buildBlogPostingJsonLd, buildBreadcrumbJsonLd, formatPostDate, productSlugsOf, readingMinutes, serializeJsonLd } from "./blog";
 
 const post = getBlogPost("como-elegir-anteojos-de-sol")!;
+const gifts = getBlogPost("regalos-para-mujer-inspiracion-caribena")!;
 
 describe("Diario Azul: artículo de anteojos de sol", () => {
   it("existe y tiene los datos acordados", () => {
@@ -44,6 +47,10 @@ describe("Diario Azul: artículo de anteojos de sol", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
     for (const s of slugs) expect(s).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
   });
+  it("tiene foto principal con texto alternativo", () => {
+    expect(post.image.src).toBe("/blog/anteojos-de-sol.webp");
+    expect(post.image!.alt.length).toBeGreaterThan(20);
+  });
   it("tiempo de lectura razonable y fecha en español", () => {
     expect(readingMinutes(post)).toBeGreaterThanOrEqual(3);
     expect(formatPostDate("2026-11-17")).toBe("17 de noviembre de 2026");
@@ -70,5 +77,59 @@ describe("datos estructurados", () => {
   it("serializeJsonLd no deja pasar </script>", () => {
     expect(serializeJsonLd({ a: "</script><b>" })).not.toContain("<");
     expect(JSON.parse(serializeJsonLd({ a: "</script>" }))).toEqual({ a: "</script>" });
+  });
+});
+
+describe("Diario Azul: artículo de regalos para mujer", () => {
+  it("tiene los datos acordados", () => {
+    expect(gifts).toBeDefined();
+    expect(gifts.category).toBe("Regalos con significado");
+    expect(gifts.author).toBe("Azul Clarito");
+    expect(gifts.metaTitle).toBe("Regalos para mujer: ideas con inspiración caribeña");
+    expect(gifts.metaDescription).toBe("Descubre regalos para mujer con inspiración caribeña: accesorios, decoración y pequeños detalles para sorprender con algo especial.");
+  });
+  it("enlaza a los siete productos, sin repetir", () => {
+    expect(productSlugsOf(gifts)).toEqual(["collar-ocean-star", "mermaids-bracelet", "un-pedacito-de-mar", "porta-vasos-memorias-de-mar", "portavasos-tortuguita", "imanes-tropicales"]);
+  });
+  it("tiene cinco secciones, cuatro preguntas frecuentes y el último enlace a la tienda", () => {
+    expect(gifts.sections).toHaveLength(5);
+    expect(gifts.faq).toHaveLength(4);
+    expect(gifts.faq[3].link).toEqual({ label: "Visitar Azul Clarito Shop", href: "/shop" });
+  });
+  it("no incluye precios ni medidas", () => {
+    expect(JSON.stringify(gifts)).not.toMatch(/₡|\bCRC\b|\bcm\b|\bmm\b|gramos/i);
+  });
+  it("el más reciente (misma fecha: el primero de la lista) aparece primero en el índice", () => {
+    expect(BLOG_POSTS.map((p) => p.slug)).toEqual(["regalos-para-mujer-inspiracion-caribena", "como-elegir-anteojos-de-sol"]);
+  });
+});
+
+describe("regla permanente: portada obligatoria", () => {
+  const sinPortada = { ...post, image: undefined } as unknown as BlogPost;
+  it("un artículo sin portada no es publicable", () => {
+    expect(validateBlogPost(sinPortada)).toContain("Falta la imagen de portada (image).");
+  });
+  it("rechaza portadas sin texto alternativo, verticales, diminutas o fuera de /public", () => {
+    const con = (image: Partial<BlogPost["image"]>) => ({ ...post, image: { ...post.image, ...image } }) as BlogPost;
+    expect(validateBlogPost(con({ alt: "foto" })).join(" ")).toMatch(/texto alternativo/);
+    expect(validateBlogPost(con({ width: 700, height: 1000 })).join(" ")).toMatch(/horizontal/);
+    expect(validateBlogPost(con({ width: 640, height: 360 })).join(" ")).toMatch(/muy pequeña/);
+    expect(validateBlogPost(con({ src: "https://example.com/a.jpg" })).join(" ")).toMatch(/dentro de \/public/);
+    expect(validateBlogPost(con({}))).toEqual([]);
+  });
+  it("TODOS los artículos registrados cumplen las reglas y su archivo de portada existe", () => {
+    expect(ALL_BLOG_POSTS.length).toBeGreaterThanOrEqual(2);
+    for (const p of ALL_BLOG_POSTS) {
+      expect(validateBlogPost(p), p.slug).toEqual([]);
+      expect(existsSync(join(process.cwd(), "public", p.image.src)), `${p.slug}: falta public${p.image.src}`).toBe(true);
+    }
+  });
+  it("lo que se publica es exactamente lo válido (nada sin portada llega al sitio)", () => {
+    expect(BLOG_POSTS.length).toBe(ALL_BLOG_POSTS.length);
+    for (const p of BLOG_POSTS) expect(p.image.src).toBeTruthy();
+  });
+  it("cada artículo usa una portada distinta", () => {
+    const srcs = ALL_BLOG_POSTS.map((p) => p.image.src);
+    expect(new Set(srcs).size).toBe(srcs.length);
   });
 });

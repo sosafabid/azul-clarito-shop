@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PostCover } from "@/components/blog/PostCover";
 import { Container } from "@/components/ui/Container";
 import { WaveDivider } from "@/components/ui/WaveDivider";
 import { routes } from "@/config/routes";
@@ -37,8 +38,9 @@ export default function BlogIndexPage() {
           {BLOG_POSTS.map((post) => (
             <li key={post.slug}>
               <article className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-celeste bg-paper transition-shadow hover:shadow-soft">
-                <div className="flex aspect-[16/7] items-end bg-gradient-to-br from-aqua/40 via-celeste to-sand/70 p-6">
-                  <span className="rounded-full bg-sun px-4 py-1.5 font-display text-xs font-bold uppercase tracking-[0.14em] text-navy">{post.category}</span>
+                <div className="relative overflow-hidden rounded-t-3xl">
+                  <PostCover post={post} sizes="(min-width: 768px) 560px, 100vw" imageClassName="transition-transform duration-300 motion-safe:group-hover:scale-[1.03]" />
+                  <span className="absolute bottom-4 left-4 rounded-full bg-sun px-4 py-1.5 font-display text-xs font-bold uppercase tracking-[0.14em] text-navy shadow-sm">{post.category}</span>
                 </div>
                 <div className="flex flex-1 flex-col gap-3 p-6 sm:p-7">
                   <h2 className="text-2xl font-bold leading-snug">

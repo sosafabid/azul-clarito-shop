@@ -14,6 +14,7 @@ export const comoElegirAnteojosDeSol: BlogPost = {
   author: BLOG_AUTHOR,
   metaTitle: "Cómo elegir anteojos de sol según tu estilo | Azul Clarito",
   metaDescription: "Descubre cómo elegir anteojos de sol según tu rostro y estilo. Explora cinco modelos de Azul Clarito y encuentra tu favorito.",
+  image: { src: "/blog/anteojos-de-sol.webp", alt: "Varios anteojos de sol de Azul Clarito sobre una tela blanca, con plantas al fondo", width: 955, height: 518 },
   keywords: ["cómo elegir anteojos de sol", "lentes de sol mujer", "tipos de lentes según el rostro", "anteojos de sol Costa Rica"],
   intro: [
     "Unos anteojos de sol hacen más que proteger la vista del brillo: completan un look. Una misma camiseta cambia de carácter según la montura que la acompañe, y por eso cómo elegir anteojos de sol es, en el fondo, una pregunta sobre estilo antes que sobre tendencias.",

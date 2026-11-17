@@ -8,7 +8,9 @@
   },
   "scripts": {
     "dev": "next dev",
+    "prebuild": "tsx scripts/check-blog.ts",
     "build": "next build",
+    "blog:check": "tsx scripts/check-blog.ts",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
