@@ -4,6 +4,7 @@ import { siteConfig } from "@/config/site";
 import { legalConfig } from "@/config/legal";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { products } from "@/db/schema";
+import { BLOG_POSTS } from "@/content/blog";
 import { buildSitemapEntries, type SitemapProduct } from "@/domain/sitemap";
 
 // Lee los productos activos en cada petición: un producto nuevo aparece sin redeploy.
@@ -19,5 +20,5 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       console.error("sitemap: no se pudieron leer los productos", error);
     }
   }
-  return buildSitemapEntries({ baseUrl: siteConfig.url, now: new Date(), products: list, includeLegal: legalConfig.reviewed });
+  return buildSitemapEntries({ baseUrl: siteConfig.url, now: new Date(), products: list, includeLegal: legalConfig.reviewed, posts: BLOG_POSTS.map((post) => ({ slug: post.slug, date: post.date })) });
 }

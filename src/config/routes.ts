@@ -4,6 +4,8 @@ export const routes = {
   shop: "/shop",
   product: (slug: string) => `/shop/${encodeURIComponent(slug)}`,
   shopCollection: (slug: string) => `/shop/colecciones/${encodeURIComponent(slug)}`,
+  blog: "/blog",
+  blogPost: (slug: string) => `/blog/${encodeURIComponent(slug)}`,
   cart: "/cart",
   checkout: "/checkout",
   checkoutResult: "/checkout/result",

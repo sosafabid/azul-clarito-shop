@@ -56,6 +56,11 @@ export function SiteFooter() {
                 Sitio oficial
               </a>
             </li>
+            <li>
+              <Link href={routes.blog} className="text-paper/80 hover:text-paper hover:underline">
+                Diario Azul
+              </Link>
+            </li>
             {(Object.keys(socialLabels) as Array<keyof typeof socialLabels>).map((key) => (
               <li key={key}>
                 <a

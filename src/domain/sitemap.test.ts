@@ -17,6 +17,14 @@ describe("buildSitemapEntries", () => {
     expect(urls).toContain("https://x.cr/terminos");
     expect(urls).toContain("https://x.cr/privacidad");
   });
+  it("incluye el índice del blog y cada artículo con su fecha de publicación", () => {
+    const e = buildSitemapEntries({ baseUrl: "https://x.cr", now, products: [], includeLegal: false, posts: [{ slug: "como-elegir-anteojos-de-sol", date: "2026-11-17" }] });
+    expect(e.map((x) => x.url)).toEqual(["https://x.cr", "https://x.cr/shop", "https://x.cr/blog", "https://x.cr/blog/como-elegir-anteojos-de-sol"]);
+    expect(e[3].lastModified).toEqual(new Date("2026-11-17T00:00:00Z"));
+  });
+  it("sin artículos no lista el blog", () => {
+    expect(buildSitemapEntries({ baseUrl: "https://x.cr", now, products: [], includeLegal: false }).some((x) => x.url.includes("/blog"))).toBe(false);
+  });
   it("nunca lista rutas privadas", () => {
     const urls = buildSitemapEntries({ baseUrl: "https://x.cr", now, products: [], includeLegal: true }).map((x) => x.url).join(" ");
     expect(urls).not.toMatch(/admin|account|cart|checkout|api|colecciones/);
