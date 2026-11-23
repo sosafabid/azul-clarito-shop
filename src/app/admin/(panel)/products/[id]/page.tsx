@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { INTERNATIONAL_COLLECTION_SLUG } from "@/domain/shipping";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { EconomicsPanel } from "@/components/admin/EconomicsPanel";
@@ -77,7 +78,9 @@ export default async function EditProductPage({ params, searchParams }: { params
     lowStockThreshold: String(product.lowStockThreshold ?? 0),
     categoryId: product.categoryId ?? "",
     newCategory: "",
-    collectionIds: product.collections.map((c) => c.id),
+    // La colección "merch" se controla con la casilla de envío internacional, no con la lista de colecciones.
+    collectionIds: product.collections.filter((c) => c.slug !== INTERNATIONAL_COLLECTION_SLUG).map((c) => c.id),
+    shipsAbroad: product.collections.some((c) => c.slug === INTERNATIONAL_COLLECTION_SLUG),
     productType: product.productType,
     newCollection: "",
     imageUrls: "",

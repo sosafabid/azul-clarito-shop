@@ -25,6 +25,8 @@ export type ProductFormValues = {
   collectionIds: string[];
   productType: string;
   newCollection: string;
+  /** Se puede enviar fuera de Costa Rica (merch). */
+  shipsAbroad: boolean;
   imageUrls: string;
   isFeatured: boolean;
   isNew: boolean;
@@ -247,6 +249,16 @@ export function ProductForm({ action, mode, initial, expectedAvailableStock, sys
               ))}
             </div>
             {errors.collectionIds && <p role="alert" className="mt-1 text-xs font-semibold text-coral">{errors.collectionIds}</p>}
+          </fieldset>
+          <fieldset className="sm:col-span-2 rounded-2xl bg-celeste/25 p-4">
+            <legend className={labelClass}>Envío internacional</legend>
+            <label className="flex items-start gap-2 text-sm font-semibold text-navy">
+              <input type="checkbox" name="shipsAbroad" checked={values.shipsAbroad} onChange={(e) => set("shipsAbroad", e.target.checked)} className="mt-0.5 size-5 accent-navy" />
+              <span>
+                Es merch: se envía fuera de Costa Rica (países de América)
+                <span className="mt-1 block text-xs font-normal text-ink/70">Solo se puede comprar desde otro país si TODOS los productos del carrito tienen esta casilla marcada y hay tarifa para ese país (Envíos → Envío internacional). Sin marcar, el producto solo se envía dentro de Costa Rica.</span>
+              </span>
+            </label>
           </fieldset>
           <Field label="…o sumar una colección nueva" error={errors.newCollection} hint="Se agrega a las que marcaste.">
             <input name="newCollection" value={values.newCollection} onChange={(e) => set("newCollection", e.target.value)} className={inputClass} maxLength={60} />

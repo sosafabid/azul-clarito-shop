@@ -17,6 +17,7 @@ export function CountrySelect({ value, action, className }: { value: string; act
       }}
       className={className}
     >
+      {value === "" && <option value="" disabled>Elegí tu país</option>}
       <option value={STORE_COUNTRY}>{STORE_COUNTRY_NAME}</option>
       <optgroup label="América (solo merch)">
         {AMERICAS_COUNTRIES.map((country) => <option key={country.code} value={country.code}>{country.name}</option>)}

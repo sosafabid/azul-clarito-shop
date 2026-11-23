@@ -25,6 +25,8 @@ export type ParsedProduct = {
   /** Colecciones existentes (un producto puede estar en varias). */
   collectionIds: string[];
   newCollection: string | null;
+  /** Se puede enviar fuera de Costa Rica (merch). Se guarda como pertenencia a la colección "merch". */
+  shipsAbroad: boolean;
   /** FÍSICO (inventario + envío) o DIGITAL (PDF, sin inventario ni envío). Explícito: no se deduce de la categoría. */
   productType: ProductType;
   /** URLs de imágenes https para asociar al crear. */
@@ -170,6 +172,7 @@ export function parseProductForm(input: ProductFormInput, mode: "create" | "upda
       collectionIds,
       productType,
       newCollection: newCollection || null,
+      shipsAbroad: checked(input, "shipsAbroad"),
       imageUrls: images.urls,
       isFeatured: checked(input, "isFeatured"),
       isNew: checked(input, "isNew"),

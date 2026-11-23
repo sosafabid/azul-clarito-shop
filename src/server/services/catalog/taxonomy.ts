@@ -1,8 +1,9 @@
 import "server-only";
-import { eq, sql } from "drizzle-orm";
+import { eq, ne, sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { categories, collections } from "@/db/schema";
 import { isUuid } from "@/domain/ids";
+import { INTERNATIONAL_COLLECTION_SLUG } from "@/domain/shipping";
 import { slugify } from "@/domain/slug";
 
 /** Categorías y colecciones: elegir una existente o crear una nueva escribiendo su nombre. */
@@ -13,10 +14,11 @@ export async function listCategoryOptions(db: Database): Promise<TaxonomyOption[
 }
 
 export async function listCollectionOptions(db: Database): Promise<TaxonomyOption[]> {
-  return db.select({ id: collections.id, name: collections.name }).from(collections).orderBy(collections.name);
+  // La colección de envío internacional ("merch") no se elige acá: se controla con la casilla "Se envía fuera de Costa Rica".
+  return db.select({ id: collections.id, name: collections.name }).from(collections).where(ne(collections.slug, INTERNATIONAL_COLLECTION_SLUG)).orderBy(collections.name);
 }
 
-type Input = { categoryId: string | null; newCategory: string | null; collectionIds: readonly string[]; newCollection: string | null };
+type Input = { categoryId: string | null; newCategory: string | null; collectionIds: readonly string[]; newCollection: string | null; shipsAbroad?: boolean };
 export type ResolvedTaxonomy =
   | { ok: true; categoryId: string | null; collectionIds: string[] }
   | { ok: false; errors: Record<string, string> };
@@ -65,6 +67,15 @@ export async function resolveTaxonomy(db: Database, input: Input): Promise<Resol
     const created = await findOrCreate(db, collections, input.newCollection);
     if (created) collectionIds.add(created);
     else errors.newCollection = "El nombre de la colección no es válido.";
+  }
+
+  // Envío internacional: la casilla agrega el producto a la colección "merch" (se crea y se activa si hace falta).
+  if (input.shipsAbroad) {
+    const merchId = await findOrCreate(db, collections, "Merch");
+    if (merchId) {
+      await db.update(collections).set({ isActive: true }).where(eq(collections.id, merchId));
+      collectionIds.add(merchId);
+    }
   }
 
   return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, categoryId, collectionIds: [...collectionIds] };

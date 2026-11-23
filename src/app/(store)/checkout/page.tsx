@@ -69,7 +69,9 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const method = shipping.method;
   // Un país distinto de Costa Rica (request manipulada) NUNCA recibe envío: se le explica en vez de pedirle la dirección de nuevo.
   const countryProblem = countryRejected || shipping.state === "unsupported_country";
-  const country = destination?.country ?? STORE_COUNTRY;
+  // "Envío internacional": se elige con su tarjeta (entrega=internacional) o con un país de América en la URL; sin país, se pide elegirlo.
+  const intlMode = !countryRejected && (params.entrega === "internacional" || (destination !== null && destination.country !== STORE_COUNTRY));
+  const country = destination?.country ?? (intlMode ? "" : STORE_COUNTRY);
   const abroad = country !== STORE_COUNTRY;
   const restricted = shipping.state === "domestic_only";
   // Pedido solo digital: sin envío (₡0) ni dirección de entrega. Solo se pide una dirección de FACTURACIÓN (la pasarela la exige).
@@ -78,9 +80,11 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   // Retiro en persona: no hay dirección de entrega ni envío; se pide solo la dirección de FACTURACIÓN (la pasarela la exige).
   const pickupChosen = shipping.required && shipping.choice === "PICKUP" && shipping.selected?.type === "PICKUP";
   const deliveryParams = new URLSearchParams();
-  for (const key of ["pais", "provincia", "ciudad", "cp"] as const) if (params[key]) deliveryParams.set(key, params[key]);
+  if (!abroad) for (const key of ["provincia", "ciudad", "cp"] as const) if (params[key]) deliveryParams.set(key, params[key]);
   const deliveryHref = deliveryParams.size > 0 ? `${routes.checkout}?${deliveryParams}` : routes.checkout;
   const pickupHref = `${routes.checkout}?entrega=retiro`;
+  const intlHref = `${routes.checkout}?entrega=internacional`;
+  const intlChosen = intlMode && !pickupChosen;
 
   return (
     <section className="bg-paper py-10 sm:py-14">
@@ -105,20 +109,34 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
             </div>
           ) : (
           <>
-          {shipping.pickup && (
+          {(shipping.pickup || shipping.required) && (
             <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
               <legend className="px-2 font-display text-xl font-bold text-navy">¿Cómo querés recibir tu pedido?</legend>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                {method && (
-                  <Link href={deliveryHref} aria-current={!pickupChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", !pickupChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
+              <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                {method && !abroad && (
+                  <Link href={deliveryHref} aria-current={!pickupChosen && !intlChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", !pickupChosen && !intlChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
                     <span className="block font-display font-bold text-navy">{method.name}</span>
-                    <span className="mt-1 block text-sm text-ink/70">Te lo enviamos a la dirección que indiques.</span>
+                    <span className="mt-1 block text-sm text-ink/70">Te lo enviamos a la dirección que indiques en Costa Rica.</span>
                   </Link>
                 )}
-                <Link href={pickupHref} aria-current={pickupChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", pickupChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
-                  <span className="block font-display font-bold text-navy">{shipping.pickup.name}</span>
-                  <span className="mt-1 block text-sm text-ink/70">{shipping.pickup.amount === 0 ? "Sin costo de envío." : `Costo: ${money(shipping.pickup.amount)}.`}</span>
-                </Link>
+                {abroad && (
+                  <Link href={routes.checkout} className="rounded-2xl border-2 border-celeste p-4 transition hover:border-aqua">
+                    <span className="block font-display font-bold text-navy">Envío nacional</span>
+                    <span className="mt-1 block text-sm text-ink/70">Te lo enviamos a la dirección que indiques en Costa Rica.</span>
+                  </Link>
+                )}
+                {shipping.required && (
+                  <Link href={intlHref} aria-current={intlChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", intlChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
+                    <span className="block font-display font-bold text-navy">Envío internacional</span>
+                    <span className="mt-1 block text-sm text-ink/70">A países de América. Solo para merch (camisas y gorras).</span>
+                  </Link>
+                )}
+                {shipping.pickup && (
+                  <Link href={pickupHref} aria-current={pickupChosen ? "true" : undefined} className={cn("rounded-2xl border-2 p-4 transition", pickupChosen ? "border-navy bg-celeste/30" : "border-celeste hover:border-aqua")}>
+                    <span className="block font-display font-bold text-navy">{shipping.pickup.name}</span>
+                    <span className="mt-1 block text-sm text-ink/70">{shipping.pickup.amount === 0 ? "Sin costo de envío." : `Costo: ${money(shipping.pickup.amount)}.`}</span>
+                  </Link>
+                )}
               </div>
             </fieldset>
           )}
@@ -140,7 +158,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                   País
                   <CountrySelect value={country} action={routes.checkout} className={`${input} mt-1.5 font-sans font-normal`} />
                 </label>
-                {abroad ? (
+                {country === "" ? null : abroad ? (
                   <label className="font-display text-sm font-bold text-navy">
                     Estado / provincia
                     <input name="provincia" required maxLength={80} defaultValue={destination?.province ?? ""} className={`${input} mt-1.5 font-sans font-normal`} />
@@ -154,19 +172,25 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                     </select>
                   </label>
                 )}
-                <label className="font-display text-sm font-bold text-navy">{abroad ? "Ciudad" : "Ciudad / cantón"}<input name="ciudad" required={abroad} maxLength={80} defaultValue={destination?.city ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
-                {abroad ? (
+                {country !== "" && <label className="font-display text-sm font-bold text-navy">{abroad ? "Ciudad" : "Ciudad / cantón"}<input name="ciudad" required={abroad} maxLength={80} defaultValue={destination?.city ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>}
+                {country === "" ? null : abroad ? (
                   <label className="font-display text-sm font-bold text-navy">Código postal<input name="cp" required maxLength={10} defaultValue={destination?.postalCode ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
                 ) : (
                   <label className="font-display text-sm font-bold text-navy">Código postal (5 dígitos)<input name="cp" required inputMode="numeric" pattern="[0-9]{5}" maxLength={5} defaultValue={destination?.postalCode ?? ""} className={`${input} mt-1.5 font-sans font-normal`} /></label>
                 )}
               </div>
+              {country === "" && <p className="mt-3 text-sm text-ink/75">Elegí tu país para ver si enviamos allí y cuánto cuesta.</p>}
               <p className="mt-3 text-xs text-ink/60">La dirección exacta y tus datos se piden en el siguiente paso.</p>
             </fieldset>
 
             <fieldset className="rounded-3xl border border-celeste p-5 sm:p-6">
               <legend className="px-2 font-display text-xl font-bold text-navy">Envío</legend>
-              {method ? (
+              {country === "" ? (
+                <div className="mt-2">
+                  <p className="font-display text-lg font-bold text-navy">Envío internacional</p>
+                  <p className="mt-1 text-sm text-ink/75">Elegí tu país para ver el costo del envío.</p>
+                </div>
+              ) : method ? (
                 <div className="mt-2">
                   <p className="font-display text-lg font-bold text-navy">{method.name}</p>
                   {method.description && <p className="mt-1 text-sm leading-relaxed text-ink/75">{method.description}</p>}
@@ -182,7 +206,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                   <Link href={routes.cart} className="mt-2 inline-block font-semibold text-navy underline underline-offset-4">Ir al carrito</Link>
                 </div>
               )}
-              {abroad && !countryProblem && !restricted && shipping.state === "needs_destination" && <p className="mt-3 text-sm text-ink/75">Escribí tu dirección para ver el costo del envío.</p>}
+              {abroad && country !== "" && !countryProblem && !restricted && shipping.state === "needs_destination" && <p className="mt-3 text-sm text-ink/75">Escribí tu dirección para ver el costo del envío.</p>}
               {method && !countryProblem && !abroad && shipping.state === "needs_destination" && <p className="mt-3 text-sm text-ink/75">Seleccioná tu provincia para ver el costo del envío.</p>}
               {!countryProblem && !restricted && shipping.state === "not_configured" && <p className="mt-3 text-sm font-semibold text-coral">{abroad ? `Todavía no enviamos a ${countryName(country)}. Escribinos a tienda@azulclaritocr.com y vemos cómo ayudarte.` : "El envío para este destino todavía no está configurado."}</p>}
               {abroad && shipping.state === "selected" && <p className="mt-3 text-xs text-ink/60">Los impuestos o aranceles de importación de tu país, si los hay, no están incluidos en el total y los paga quien recibe el paquete.</p>}
@@ -195,7 +219,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
               )}
             </fieldset>
             {hasDigital && <p className="rounded-2xl bg-aqua/15 p-4 text-sm text-navy">Los productos digitales de tu carrito no pagan envío: la tarifa se calcula solo con los productos físicos.</p>}
-            <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">Actualizar resumen</button>
+            {country !== "" && <button type="submit" className="inline-flex min-h-12 items-center rounded-full border-2 border-navy px-8 py-3 font-display font-bold text-navy hover:bg-navy hover:text-paper">Actualizar resumen</button>}
           </form>
           )}
           </>
@@ -236,10 +260,11 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
                 <dd className="font-semibold">{tax.applied ? money(tax.amount) : "No aplican"}</dd>
               </div>
               <div className={row}>
-                <dt>{digitalOnly ? "Envío" : pickupChosen ? (shipping.selected?.name ?? "Retiro en persona") : (method?.name ?? "Envío")}</dt>
+                <dt>{digitalOnly ? "Envío" : pickupChosen ? (shipping.selected?.name ?? "Retiro en persona") : country === "" ? "Envío internacional" : (method?.name ?? "Envío")}</dt>
                 <dd className="max-w-[12rem] text-right font-semibold">
                   {digitalOnly ? `${money(0)} · entrega digital`
                     : pickupChosen && shipping.selected ? (shipping.selected.amount === 0 ? "Gratis" : money(shipping.selected.amount))
+                    : country === "" ? "Elegí tu país para ver el costo del envío"
                     : countryProblem ? "Solo enviamos a Costa Rica y a América"
                     : restricted ? "No disponible para este destino"
                     : !method && abroad ? `Todavía no enviamos a ${countryName(country)}`

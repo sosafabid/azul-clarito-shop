@@ -55,7 +55,7 @@ export type AdminProduct = {
   categoryId: string | null;
   categoryName: string | null;
   /** Colecciones del producto (puede estar en varias). */
-  collections: { id: string; name: string }[];
+  collections: { id: string; name: string; slug: string }[];
   productType: ProductType;
   /** Tiene un archivo digital activo (solo importa en productos DIGITALES). */
   hasDigitalAsset: boolean;
@@ -85,7 +85,7 @@ const adminProductColumns = {
   cost: products.cost,
   categoryId: products.categoryId,
   categoryName: categories.name,
-  collections: sql<{ id: string; name: string }[]>`coalesce((select json_agg(json_build_object('id', co.id, 'name', co.name) order by co.name) from product_collections pc join collections co on co.id = pc.collection_id where pc.product_id = ${products.id}), '[]'::json)`,
+  collections: sql<{ id: string; name: string; slug: string }[]>`coalesce((select json_agg(json_build_object('id', co.id, 'name', co.name, 'slug', co.slug) order by co.name) from product_collections pc join collections co on co.id = pc.collection_id where pc.product_id = ${products.id}), '[]'::json)`,
   productType: products.productType,
   hasDigitalAsset: sql<boolean>`exists (select 1 from digital_assets da where da.product_id = ${products.id} and da.is_active)`,
   inventoryId: inventory.id,

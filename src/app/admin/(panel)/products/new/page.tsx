@@ -32,6 +32,7 @@ const EMPTY: ProductFormValues = {
   collectionIds: [],
   productType: "PHYSICAL",
   newCollection: "",
+  shipsAbroad: false,
   imageUrls: "",
   isFeatured: false,
   isNew: false,
