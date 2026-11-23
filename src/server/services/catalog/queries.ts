@@ -127,14 +127,16 @@ export async function getPublicProductBySlug(db: Database, slug: string): Promis
     .where(eq(productImages.productId, row.id))
     .orderBy(desc(productImages.isPrimary), asc(productImages.sortOrder), asc(productImages.createdAt));
 
+  // OJO: con una sola tabla en el FROM, drizzle escribe `${productVariants.id}` como "id" sin tabla y la subconsulta
+  // lo confunde con inventory.id (todo salía agotado). Por eso se califica a mano.
   const variantRows = await db
     .select({
       id: productVariants.id,
       name: productVariants.name,
       options: productVariants.options,
       price: productVariants.price,
-      availableStock: sql<number>`coalesce((select sum(i.available_stock) from inventory i where i.variant_id = ${productVariants.id}), 0)`.mapWith(Number),
-      lowStockThreshold: sql<number>`coalesce((select max(i.low_stock_threshold) from inventory i where i.variant_id = ${productVariants.id}), 0)`.mapWith(Number),
+      availableStock: sql<number>`coalesce((select sum(i.available_stock) from inventory i where i.variant_id = "product_variants"."id"), 0)`.mapWith(Number),
+      lowStockThreshold: sql<number>`coalesce((select max(i.low_stock_threshold) from inventory i where i.variant_id = "product_variants"."id"), 0)`.mapWith(Number),
     })
     .from(productVariants)
     .where(and(eq(productVariants.productId, row.id), eq(productVariants.isActive, true)))
