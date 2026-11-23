@@ -6,12 +6,13 @@ import { getDb, isDatabaseConfigured } from "@/db";
 import { catalogCapabilities } from "@/domain/capabilities";
 import { constrainVariantInput } from "@/domain/catalog-limits";
 import { toCurrency } from "@/domain/money";
+import { parseSizesForm } from "@/domain/sizes";
 import { parseVariantForm } from "@/domain/variant-form";
 import { formToRecord } from "@/server/admin-forms";
 import { requirePermission } from "@/server/auth";
 import { resolveAuditActor } from "@/server/services/audit";
 import { getAdminProduct } from "@/server/services/catalog/admin";
-import { addVariant, deleteVariant, listProductVariants, setVariantActive, updateVariant, type VariantResult } from "@/server/services/catalog/admin-variants";
+import { addSizeVariants, addVariant, deleteVariant, listProductVariants, setVariantActive, updateVariant, type VariantResult } from "@/server/services/catalog/admin-variants";
 import type { ProductFormState } from "./products";
 
 /** Acciones de variantes. Agregar/editar/desactivar: STAFF o SUPER_ADMIN (sin costo ni stock para STAFF); eliminar: solo SUPER_ADMIN. */
@@ -35,6 +36,24 @@ export async function addVariantAction(productId: string, _previous: ProductForm
   const result = await addVariant(getDb(), productId, data, resolveAuditActor(session));
   if (!result.ok) return failure(result);
   redirect(back(productId, "variant-added"));
+}
+
+/** Crea varias tallas de una vez (XS, S, M…) con su stock. Todas o ninguna. */
+export async function addSizesAction(productId: string, _previous: ProductFormState, formData: FormData): Promise<ProductFormState> {
+  const session = await requirePermission("products:write");
+  if (!isDatabaseConfigured()) return NO_DB;
+  const product = await getAdminProduct(getDb(), productId);
+  if (!product) return { errors: {}, message: "Producto no encontrado." };
+
+  const parsed = parseSizesForm(formToRecord(formData), toCurrency(product.currency));
+  if (!parsed.ok) return { errors: parsed.errors };
+
+  // Sin permiso de costos / stock no se guardan (igual que al agregar una variante suelta).
+  const caps = catalogCapabilities(session.role);
+  const data = { ...parsed.data, cost: caps.costs ? parsed.data.cost : null, sizes: parsed.data.sizes.map((s) => ({ ...s, stock: caps.stock ? s.stock : 0 })) };
+  const result = await addSizeVariants(getDb(), productId, data, resolveAuditActor(session));
+  if (!result.ok) return { errors: result.code === "sku_taken" ? { baseSku: result.message } : {}, message: result.message };
+  redirect(back(productId, "sizes-added"));
 }
 
 export async function updateVariantAction(productId: string, variantId: string, _previous: ProductFormState, formData: FormData): Promise<ProductFormState> {

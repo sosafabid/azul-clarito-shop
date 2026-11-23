@@ -13,6 +13,7 @@ export const PRODUCT_NOTICES: Record<string, { tone: "success" | "warning" | "er
   "image-moved": { tone: "success", text: "Orden actualizado." },
   "image-updated": { tone: "success", text: "Texto alternativo guardado." },
   "variant-added": { tone: "success", text: "Variante agregada." },
+  "sizes-added": { tone: "success", text: "Tallas agregadas. Revisá el stock de cada una." },
   "variant-updated": { tone: "success", text: "Variante actualizada." },
   "variant-deleted": { tone: "success", text: "Variante eliminada." },
   "variant-delete-blocked": { tone: "warning", text: "Esa variante tiene historial de ventas: no se puede eliminar, pero sí desactivar." },

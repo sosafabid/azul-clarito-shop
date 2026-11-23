@@ -1,8 +1,10 @@
 import "server-only";
-import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import type { Database } from "@/db/client";
 import { inventory, productVariants, products } from "@/db/schema";
 import { isUuid } from "@/domain/ids";
+import { SIZE_KEY, isSizeKey, normalizeSize, sizeSku, type ParsedSizes } from "@/domain/sizes";
 import type { ParsedVariant } from "@/domain/variant-form";
 import { auditInsert, toAuditRow, type AuditActor } from "@/server/services/audit";
 import { adjustAvailableStock } from "@/server/services/inventory/stock";
@@ -121,6 +123,61 @@ export async function addVariant(db: Database, productId: string, input: ParsedV
         },
       ]),
     ]);
+    return { ok: true };
+  } catch (error) {
+    if (uniqueViolationConstraint(error) !== null) return SKU_TAKEN;
+    throw error;
+  }
+}
+
+/**
+ * Crea varias TALLAS de una vez (todas o ninguna): una variante { Talla: X } con su SKU, su stock y su fila de inventario cada una.
+ * Rechaza tallas que el producto ya tiene o SKU repetidos, y no mezcla con un producto que ya tiene stock propio.
+ */
+export async function addSizeVariants(db: Database, productId: string, input: ParsedSizes, actor: AuditActor): Promise<VariantResult> {
+  const product = await getAdminProduct(db, productId);
+  if (!product) return { ok: false, code: "not_found", message: "Producto no encontrado." };
+
+  const hasSimpleStock = (product.availableStock ?? 0) > 0 || (product.reservedStock ?? 0) > 0 || (product.soldStock ?? 0) > 0;
+  if (product.variantCount === 0 && hasSimpleStock) {
+    return {
+      ok: false,
+      code: "has_simple_stock",
+      message: `Este producto tiene stock propio (disponible ${product.availableStock ?? 0}, reservado ${product.reservedStock ?? 0}, vendido ${product.soldStock ?? 0}). Para usar tallas, primero poné su stock disponible en 0; después el stock se gestiona en cada talla.`,
+    };
+  }
+
+  const existing = await listProductVariants(db, productId);
+  const existingSizes = new Set(existing.flatMap((v) => Object.entries(v.options).filter(([key]) => isSizeKey(key)).map(([, value]) => normalizeSize(value).toLowerCase())));
+  const repeated = input.sizes.filter((s) => existingSizes.has(s.size.toLowerCase())).map((s) => s.size);
+  if (repeated.length > 0) return { ok: false, code: "blocked", message: `Este producto ya tiene las tallas: ${repeated.join(", ")}. Quitalas de la lista (o editá esas variantes).` };
+
+  const planned = input.sizes.map((entry) => ({ ...entry, sku: sizeSku(input.baseSku, entry.size) }));
+  if (new Set(planned.map((p) => p.sku)).size !== planned.length) return { ok: false, code: "sku_taken", message: "Dos tallas generan el mismo SKU. Cambiá el SKU base o los nombres de las tallas." };
+  const skus = planned.map((p) => p.sku);
+  const [variantClash, productClash] = await Promise.all([
+    db.select({ sku: productVariants.sku }).from(productVariants).where(inArray(productVariants.sku, skus)),
+    db.select({ sku: products.sku }).from(products).where(inArray(products.sku, skus)),
+  ]);
+  const taken = [...variantClash, ...productClash].map((row) => row.sku);
+  if (taken.length > 0) return { ok: false, code: "sku_taken", message: `Ya existen estos SKU: ${taken.join(", ")}. Elegí otro SKU base.` };
+
+  const statements: BatchItem<"pg">[] = [];
+  planned.forEach((entry, index) => {
+    const id = crypto.randomUUID();
+    statements.push(
+      db.insert(productVariants).values({ id, productId, sku: entry.sku, name: entry.size, options: { [SIZE_KEY]: entry.size }, price: input.price, cost: input.cost, isActive: input.isActive, sortOrder: product.variantCount + index }),
+      db.insert(inventory).values({ productId, variantId: id, availableStock: entry.stock, lowStockThreshold: product.lowStockThreshold ?? 0 }),
+    );
+  });
+  statements.push(
+    db.delete(inventory).where(and(eq(inventory.productId, productId), isNull(inventory.variantId), sql`${inventory.availableStock} = 0 and ${inventory.reservedStock} = 0 and ${inventory.soldStock} = 0`)),
+    auditInsert(db, actor, [
+      { action: "product.sizes_added", entityType: "product", entityId: productId, metadata: { productName: product.name, sku: product.sku, sizes: planned.map((p) => ({ size: p.size, sku: p.sku, availableStock: p.stock })), price: input.price, cost: input.cost } },
+    ]),
+  );
+  try {
+    await db.batch(statements as [BatchItem<"pg">, ...BatchItem<"pg">[]]);
     return { ok: true };
   } catch (error) {
     if (uniqueViolationConstraint(error) !== null) return SKU_TAKEN;

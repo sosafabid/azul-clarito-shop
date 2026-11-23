@@ -10,6 +10,7 @@ import { Container } from "@/components/ui/Container";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { variantLabel } from "@/domain/cart";
+import { sizeValueOf } from "@/domain/sizes";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { SLUG_PATTERN } from "@/domain/slug";
 import { getPublicProductBySlug } from "@/server/services/catalog/queries";
@@ -85,6 +86,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                 label: variantLabel(variant),
                 priceLabel: variant.price !== null ? formatMoney(variant.price, toCurrency(product.currency)) : null,
                 availability: variant.availability,
+                size: sizeValueOf(variant.options),
               }))}
             />
             {product.productType === "DIGITAL" && (

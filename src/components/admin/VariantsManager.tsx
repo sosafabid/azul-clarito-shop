@@ -1,6 +1,7 @@
+import { SizesForm } from "@/components/admin/SizesForm";
 import { VariantForm } from "@/components/admin/VariantForm";
 import { formatMoney, toCurrency } from "@/domain/money";
-import { addVariantAction, deleteVariantAction, toggleVariantAction, updateVariantAction } from "@/server/actions/product-variants";
+import { addSizesAction, addVariantAction, deleteVariantAction, toggleVariantAction, updateVariantAction } from "@/server/actions/product-variants";
 import type { AdminVariant } from "@/server/services/catalog/admin-variants";
 
 const smallButton =
@@ -91,8 +92,16 @@ export function VariantsManager({
         </ul>
       )}
 
-      <details className="rounded-2xl bg-celeste/25 p-4" open={variants.length === 0 ? false : undefined}>
-        <summary className="cursor-pointer font-display text-base font-bold text-navy">+ Agregar variante</summary>
+      <details className="rounded-2xl bg-celeste/25 p-4" open={variants.length === 0 ? true : undefined}>
+        <summary className="cursor-pointer font-display text-base font-bold text-navy">+ Agregar tallas de una vez (ropa)</summary>
+        <p className="mt-2 text-sm text-ink/70">Para camisetas, gorras y otra ropa: marcá las tallas que hay y su stock, y se crean todas juntas.</p>
+        <div className="mt-4">
+          <SizesForm action={addSizesAction.bind(null, productId)} currencyHint={currency} caps={caps} />
+        </div>
+      </details>
+
+      <details className="rounded-2xl bg-celeste/25 p-4">
+        <summary className="cursor-pointer font-display text-base font-bold text-navy">+ Agregar variante (color, diseño u otra opción)</summary>
         <div className="mt-4">
           <VariantForm
             action={addVariantAction.bind(null, productId)}

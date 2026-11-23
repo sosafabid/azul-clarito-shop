@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { routes } from "@/config/routes";
 import { MAX_QUANTITY_PER_LINE } from "@/domain/cart";
+import { compareSizes } from "@/domain/sizes";
 import { cn } from "@/lib/utils";
 import { safeCartAction } from "@/components/cart/safe-action";
 import { addToCartAction } from "@/server/actions/cart";
@@ -12,7 +13,7 @@ const safeAdd = safeCartAction(addToCartAction);
 import type { ProductAvailability } from "@/types/catalog";
 import { AvailabilityBadge } from "./AvailabilityBadge";
 
-export type VariantOption = { id: string; label: string; priceLabel: string | null; availability: ProductAvailability };
+export type VariantOption = { id: string; label: string; priceLabel: string | null; availability: ProductAvailability; /** Talla, si la única opción de la variante es la talla. */ size?: string | null };
 
 /**
  * Agregar al carrito desde la ficha del producto.
@@ -28,6 +29,10 @@ export function AddToCartForm({ productId, options, soldOut }: { productId: stri
   const [dismissed, setDismissed] = useState<typeof state>(null);
 
   const needsVariant = options.length > 0;
+  // Ropa: si TODAS las variantes son solo una talla, se muestran como botones ordenados (XS → XXL).
+  const sizeMode = needsVariant && options.every((option) => Boolean(option.size));
+  const sizeOptions = sizeMode ? [...options].sort((a, b) => compareSizes(a.size ?? "", b.size ?? "")) : [];
+  const selectedOption = options.find((option) => option.id === variantId) ?? null;
   const missingVariant = needsVariant && variantId === "";
   const disabled = soldOut || pending || missingVariant;
   const feedback = state && state !== dismissed ? state : null;
@@ -37,7 +42,55 @@ export function AddToCartForm({ productId, options, soldOut }: { productId: stri
     <form action={formAction} className="mt-8 space-y-5" noValidate>
       <input type="hidden" name="productId" value={productId} />
 
-      {needsVariant && (
+      {sizeMode && (
+        <fieldset>
+          <legend className="font-display text-sm font-bold uppercase tracking-[0.14em] text-navy/60">Elegí tu talla *</legend>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {sizeOptions.map((option) => {
+              const unavailable = option.availability === "out_of_stock";
+              const selected = variantId === option.id;
+              return (
+                <label
+                  key={option.id}
+                  className={cn(
+                    "relative flex min-h-12 min-w-14 cursor-pointer items-center justify-center rounded-full border-2 px-4 font-display font-bold transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-aqua has-[:focus-visible]:ring-offset-2",
+                    selected ? "border-navy bg-navy text-paper" : "border-celeste text-navy hover:border-aqua",
+                    unavailable && "cursor-not-allowed border-dashed text-ink/40 line-through hover:border-celeste",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="variantId"
+                    value={option.id}
+                    checked={selected}
+                    disabled={unavailable}
+                    onChange={() => {
+                      setVariantId(option.id);
+                      setDismissed(state);
+                    }}
+                    className="sr-only"
+                  />
+                  {option.size}
+                  {unavailable && <span className="sr-only"> (agotada)</span>}
+                </label>
+              );
+            })}
+          </div>
+          <div className="mt-3 min-h-7 text-sm" aria-live="polite">
+            {selectedOption ? (
+              <span className="inline-flex flex-wrap items-center gap-2 text-ink/80">
+                Talla <strong className="text-navy">{selectedOption.size}</strong>
+                {selectedOption.priceLabel && <span>· {selectedOption.priceLabel}</span>}
+                <AvailabilityBadge availability={selectedOption.availability} />
+              </span>
+            ) : (
+              <span className="text-ink/60">Las tallas tachadas están agotadas.</span>
+            )}
+          </div>
+        </fieldset>
+      )}
+
+      {needsVariant && !sizeMode && (
         <fieldset>
           <legend className="font-display text-sm font-bold uppercase tracking-[0.14em] text-navy/60">Elegí una opción *</legend>
           <div className="mt-3 grid gap-2">
@@ -128,7 +181,7 @@ export function AddToCartForm({ productId, options, soldOut }: { productId: stri
       </div>
 
       <div id="add-to-cart-hint" role="status" aria-live="polite" className="min-h-6 text-sm">
-        {missingVariant && !soldOut && <p className="text-ink/60">Elegí una opción para poder agregar al carrito.</p>}
+        {missingVariant && !soldOut && <p className="text-ink/60">{sizeMode ? "Elegí tu talla para poder agregar al carrito." : "Elegí una opción para poder agregar al carrito."}</p>}
         {feedback && (
           <p className={cn("font-semibold", feedback.ok ? "text-navy" : "text-coral")}>
             {feedback.ok ? "✓ " : ""}
