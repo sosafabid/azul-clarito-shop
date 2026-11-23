@@ -1,9 +1,9 @@
 import "server-only";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Database } from "@/db/client";
-import { products, shippingMethods, shippingRates, taxRates, taxRules } from "@/db/schema";
+import { collections, productCollections, products, shippingMethods, shippingRates, taxRates, taxRules } from "@/db/schema";
 import { computeTotals, type CheckoutTotals, type MethodInput, type TaxConfig } from "@/domain/checkout";
-import type { Destination } from "@/domain/shipping";
+import { INTERNATIONAL_COLLECTION_SLUG, type Destination } from "@/domain/shipping";
 import { getCartView } from "@/server/services/cart/cart";
 import type { CartOwner, CartView } from "@/server/services/cart/types";
 
@@ -56,8 +56,20 @@ export async function loadShippingMethods(db: Database): Promise<MethodInput[]> 
         minOrderAmount: rate.minOrderAmount,
         maxOrderAmount: rate.maxOrderAmount,
         freeShippingThreshold: rate.freeShippingThreshold,
+        note: rate.zoneName,
       })),
   }));
+}
+
+/** Productos (de los dados) que se pueden enviar al exterior: los de la colección ACTIVA "merch". */
+export async function loadAbroadProductIds(db: Database, productIds: readonly string[]): Promise<Set<string>> {
+  if (productIds.length === 0) return new Set();
+  const rows = await db
+    .select({ productId: productCollections.productId })
+    .from(productCollections)
+    .innerJoin(collections, eq(collections.id, productCollections.collectionId))
+    .where(and(inArray(productCollections.productId, [...productIds]), eq(collections.slug, INTERNATIONAL_COLLECTION_SLUG), eq(collections.isActive, true)));
+  return new Set(rows.map((row) => row.productId));
 }
 
 const EMPTY_CART: CartView = { lines: [], currency: null, subtotal: 0, totalUnits: 0, hasIssues: false };
@@ -74,8 +86,8 @@ export async function calculateCheckoutTotals(
   const categoryRows = productIds.length > 0 ? await db.select({ id: products.id, categoryId: products.categoryId }).from(products).where(inArray(products.id, productIds)) : [];
   const categoryOf = new Map(categoryRows.map((row) => [row.id, row.categoryId]));
 
-  // 3) Impuesto y envíos vigentes ahora mismo.
-  const [tax, methods] = await Promise.all([loadTaxConfig(db), loadShippingMethods(db)]);
+  // 3) Impuesto y envíos vigentes ahora mismo, y qué productos se pueden enviar al exterior (merch).
+  const [tax, methods, abroadIds] = await Promise.all([loadTaxConfig(db), loadShippingMethods(db), loadAbroadProductIds(db, productIds)]);
 
   const totals = computeTotals({
     currency: cart.currency ?? "CRC",
@@ -90,6 +102,7 @@ export async function calculateCheckoutTotals(
       unitPrice: line.unitPrice,
       status: line.status,
       fulfillment: line.fulfillment,
+      shipsAbroad: abroadIds.has(line.productId),
     })),
     tax,
     destination: input.destination,

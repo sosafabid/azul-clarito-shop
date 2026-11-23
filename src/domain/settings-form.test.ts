@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseNationalShippingForm, parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "./settings-form";
+import { parseInternationalShippingForm, parseNationalShippingForm, parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "./settings-form";
 import { parseDestination } from "./shipping";
 
 describe("formulario de impuesto", () => {
@@ -54,15 +54,19 @@ describe("tarifa de envío", () => {
   });
 });
 
-describe("destino que llega por la URL (no confiable): solo Costa Rica", () => {
+describe("destino que llega por la URL (no confiable): Costa Rica o América", () => {
   it("normaliza la provincia al nombre oficial y limpia la ciudad", () =>
     expect(parseDestination({ provincia: "  san jose ", ciudad: "Escazú" })).toEqual({ destination: { country: "CR", province: "San José", city: "Escazú", postalCode: null }, countryRejected: false }));
   it("pais=CR (o cr) es válido", () => {
     expect(parseDestination({ pais: "CR", provincia: "Limón" }).destination?.country).toBe("CR");
     expect(parseDestination({ pais: "cr", provincia: "limon" }).destination?.province).toBe("Limón");
   });
-  it("cualquier otro país se RECHAZA (request manipulada)", () => {
-    for (const pais of ["US", "MX", "ZZ", "CRX", "1", "--", "Costa Rica"]) expect(parseDestination({ pais, provincia: "San José" })).toEqual({ destination: null, countryRejected: true });
+  it("cualquier país que no sea Costa Rica ni de América se RECHAZA (request manipulada)", () => {
+    for (const pais of ["ES", "JP", "ZZ", "CRX", "1", "--", "Costa Rica"]) expect(parseDestination({ pais, provincia: "San José" })).toEqual({ destination: null, countryRejected: true });
+  });
+  it("un país de América es válido con solo elegirlo; estado y ciudad son texto libre", () => {
+    expect(parseDestination({ pais: "mx" })).toEqual({ destination: { country: "MX", province: null, city: null, postalCode: null }, countryRejected: false });
+    expect(parseDestination({ pais: "US", provincia: "Texas", ciudad: "Austin", cp: "73301" }).destination).toEqual({ country: "US", province: "Texas", city: "Austin", postalCode: "73301" });
   });
   it("provincia ausente o que no existe en Costa Rica → todavía no hay destino", () => {
     for (const provincia of [undefined, "", "Texas", "Cundinamarca"]) expect(parseDestination({ provincia })).toEqual({ destination: null, countryRejected: false });
@@ -96,4 +100,24 @@ describe("formulario simple del Envío nacional", () => {
   });
   it("sin marcar 'activo' queda desactivado", () => expect(parseNationalShippingForm({ ...ok, active: undefined })).toMatchObject({ ok: true, data: { active: false } }));
   it("el país no forma parte del formulario (por ahora solo Costa Rica)", () => expect(JSON.stringify(parseNationalShippingForm({ ...ok, country: "US" }))).not.toContain("US"));
+});
+
+describe("formulario de envío internacional", () => {
+  it("precio por país en colones; vacío = se quita; la nota se guarda", () => {
+    const r = parseInternationalShippingForm({ active: "on", price_MX: "18000", note_MX: "DHL · 7–12 días", price_US: "", price_PA: "9500" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.data.active).toBe(true);
+    expect(r.data.rates).toEqual([{ countryCode: "MX", price: 18000, note: "DHL · 7–12 días" }, { countryCode: "PA", price: 9500, note: null }]);
+    expect(r.data.removed).toContain("US");
+    expect(r.data.removed).not.toContain("MX");
+  });
+  it("rechaza precios inválidos y notas largas", () => {
+    expect(parseInternationalShippingForm({ price_MX: "abc" }).ok).toBe(false);
+    expect(parseInternationalShippingForm({ price_MX: "100", note_MX: "x".repeat(81) }).ok).toBe(false);
+  });
+  it("ignora países que no son de América (el servidor decide la lista)", () => {
+    const r = parseInternationalShippingForm({ price_ES: "100", price_CR: "100" });
+    expect(r.ok && r.data.rates).toEqual([]);
+  });
 });

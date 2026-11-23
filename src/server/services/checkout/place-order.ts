@@ -3,7 +3,6 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Database } from "@/db/client";
 import { inventory, orders, productVariants } from "@/db/schema";
 import { toCurrency, type CurrencyCode } from "@/domain/money";
-import { STORE_COUNTRY } from "@/domain/shipping";
 import type { CheckoutFormInput } from "@/domain/checkout-form";
 import { readTilopayConfig } from "@/server/payments/tilopay/config";
 import { findCartId } from "@/server/services/cart/cart";
@@ -55,7 +54,7 @@ export async function placeOrder(
   const { form } = input;
   const { totals, cart } = await calculateCheckoutTotals(db, {
     owner: input.owner,
-    destination: { country: STORE_COUNTRY, province: form.province, city: form.city, postalCode: form.postalCode },
+    destination: { country: form.country, province: form.province, city: form.city, postalCode: form.postalCode },
     shippingMethodId: null,
     choice: form.pickup ? "PICKUP" : "DELIVERY",
   });
@@ -104,7 +103,7 @@ export async function placeOrder(
     address: {
       recipientName: form.name,
       phone: form.phone,
-      countryCode: STORE_COUNTRY,
+      countryCode: form.country,
       stateProvince: form.province,
       city: form.city,
       district: form.district,

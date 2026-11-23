@@ -5,10 +5,10 @@ import { Notice } from "@/components/ui/Notice";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { SUPPORTED_CURRENCIES, formatMoney, toCurrency } from "@/domain/money";
 import { can } from "@/domain/permissions";
-import { CR_PROVINCES, SHIPPING_TYPES, SHIPPING_TYPE_LABELS } from "@/domain/shipping";
-import { deleteShippingRateAction, saveNationalShippingAction, saveShippingMethodAction, saveShippingRateAction, toggleShippingMethodAction, toggleShippingRateAction } from "@/server/actions/settings";
+import { AMERICAS_COUNTRIES, CR_PROVINCES, INTERNATIONAL_COLLECTION_SLUG, SHIPPING_TYPES, SHIPPING_TYPE_LABELS } from "@/domain/shipping";
+import { deleteShippingRateAction, saveInternationalShippingAction, saveNationalShippingAction, saveShippingMethodAction, saveShippingRateAction, toggleShippingMethodAction, toggleShippingRateAction } from "@/server/actions/settings";
 import { requirePermission } from "@/server/auth";
-import { findNationalShipping, listShippingAdmin } from "@/server/services/settings/shipping";
+import { findInternationalShipping, findNationalShipping, listShippingAdmin } from "@/server/services/settings/shipping";
 import type { ShippingMethod, ShippingRate } from "@/db/schema";
 
 export const metadata: Metadata = { title: "Envíos" };
@@ -54,7 +54,8 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
   const canWrite = can(session.role, "settings:write");
   const { saved, error } = await searchParams;
   if (!isDatabaseConfigured()) return <DatabaseNotice />;
-  const [methods, national] = await Promise.all([listShippingAdmin(getDb()), findNationalShipping(getDb())]);
+  const [methods, national, international] = await Promise.all([listShippingAdmin(getDb()), findNationalShipping(getDb()), findInternationalShipping(getDb())]);
+  const intlRateOf = new Map(international.rates.map((rate) => [rate.countryCode ?? "", rate]));
   const base = national?.baseRate ?? null;
 
   return (
@@ -62,7 +63,7 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
       <div>
         <h1 className="text-3xl font-bold">Envíos</h1>
         <p className="mt-1 text-sm text-ink/70">
-          Por ahora se envía <strong>solo dentro de Costa Rica</strong> y la logística es manual (vos preparás el paquete y lo llevás a Correos de Costa Rica u otro servicio; el seguimiento lo anotás en el pedido).
+          Se envía a <strong>Costa Rica</strong> (todos los productos) y a <strong>América</strong> (solo merch, ver &ldquo;Envío internacional&rdquo; más abajo). La logística es manual (vos preparás el paquete y lo llevás a Correos de Costa Rica u otro servicio; el seguimiento lo anotás en el pedido).
           La clienta ve un único método, <strong>&ldquo;Envío nacional&rdquo;</strong>: el primero <strong>activo</strong> de tipo <em>Entrega a domicilio</em> (por prioridad). Podés cambiar su nombre y descripción acá.
           Si hay un método <strong>activo</strong> de tipo <em>Retiro en persona</em>, la clienta también puede elegir retirar su pedido: no paga envío (₡0, o la tarifa &ldquo;todo el país&rdquo; que le pongas) y no escribe dirección de entrega. Su <em>descripción</em> se le muestra en el checkout: usala para decir dónde y cuándo se retira.
         </p>
@@ -79,12 +80,12 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
       <section className={card}>
         <h2 className="text-xl font-bold">Envío nacional</h2>
         <p className="mt-1 text-sm text-ink/70">
-          País: <strong>Costa Rica (CR)</strong> · Tarifa fija para todo el país. Por ahora solo se envía dentro de Costa Rica. Los cambios valen de inmediato para los nuevos cálculos del checkout; no hace falta tocar código ni redesplegar.
+          País: <strong>Costa Rica (CR)</strong> · Tarifa fija para todo el país. Este método es solo para envíos dentro de Costa Rica. Los cambios valen de inmediato para los nuevos cálculos del checkout; no hace falta tocar código ni redesplegar.
         </p>
         {!national && <Notice className="mt-3">Todavía no hay un método de entrega. Completá los datos y guardá para crear el &ldquo;Envío nacional&rdquo;.</Notice>}
         {national && !national.method.isActive && <Notice tone="warning" className="mt-3">El método está <strong>desactivado</strong>: el checkout muestra que no hay un método de envío disponible y no se puede continuar al pago.</Notice>}
         {national && base && base.currency !== "CRC" && <Notice tone="warning" className="mt-3">La tarifa está en {base.currency}: mientras los productos estén en colones, el envío no se va a aplicar.</Notice>}
-        {national && national.otherDeliveryMethods > 0 && <Notice className="mt-3">Hay otros métodos de entrega creados. El checkout usa solo el primero <strong>activo</strong> por prioridad.</Notice>}
+        {national && national.otherDeliveryMethods > 0 && <Notice className="mt-3">Hay otros métodos de entrega creados (sin contar el internacional). El checkout usa solo el primero <strong>activo</strong> por prioridad.</Notice>}
         {canWrite ? (
           <form action={saveNationalShippingAction} className="mt-5 grid gap-4 sm:grid-cols-2">
             <Fld label="Nombre del método"><input name="name" defaultValue={national?.method.name ?? ""} placeholder="Envío nacional" maxLength={60} required className={inputClass} /></Fld>
@@ -106,6 +107,48 @@ export default async function AdminShippingPage({ searchParams }: { searchParams
           </dl>
         ) : null}
         <p className="mt-4 text-xs text-ink/60">Si definís tarifas por zona (GAM, Limón…) abajo, para ese destino se usa la de la zona; esta tarifa cubre el resto del país.</p>
+      </section>
+
+      <section className={card}>
+        <h2 className="text-xl font-bold">Envío internacional (América)</h2>
+        <p className="mt-1 text-sm text-ink/70">
+          Solo para productos de la colección <strong>&ldquo;{INTERNATIONAL_COLLECTION_SLUG}&rdquo;</strong> (camisas y gorras): creá la colección con el slug <code>{INTERNATIONAL_COLLECTION_SLUG}</code> y agregale esos productos desde su ficha.
+          Cualquier otro producto en el carrito hace que el destino quede en &ldquo;solo Costa Rica&rdquo;. Poné <strong>una tarifa fija por país, en colones</strong>; un país sin tarifa no se puede elegir para comprar (se le avisa a la clienta). Mensajería y plazo son un texto corto que se le muestra a la clienta.
+          Se cobra el mismo IVA que en Costa Rica. Los aranceles o impuestos de importación del país de destino no se cobran acá: se le avisa a la clienta que no están incluidos.
+        </p>
+        {!international.method && <Notice className="mt-3">Todavía no hay envío internacional. Poné al menos un país con tarifa y guardá.</Notice>}
+        {international.method && !international.method.isActive && <Notice tone="warning" className="mt-3">El envío internacional está <strong>desactivado</strong>: nadie puede comprar desde el exterior.</Notice>}
+        {canWrite ? (
+          <form action={saveInternationalShippingAction} className="mt-5 space-y-4">
+            <label className="flex items-center gap-2 font-display text-sm font-bold text-navy">
+              <input type="checkbox" name="active" defaultChecked={international.method?.isActive ?? true} className="size-4 accent-navy" /> Envío internacional activo
+            </label>
+            <Fld label="Descripción para la clienta (opcional)"><textarea name="description" rows={2} maxLength={300} defaultValue={international.method?.description ?? ""} className={inputClass} /></Fld>
+            <div className="overflow-x-auto rounded-2xl border border-celeste">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-celeste/30 font-display text-navy"><tr><th className="p-3">País</th><th className="p-3">Tarifa (₡)</th><th className="p-3">Mensajería y plazo (ej. &ldquo;7–12 días hábiles&rdquo;)</th></tr></thead>
+                <tbody>
+                  {AMERICAS_COUNTRIES.map((country) => {
+                    const rate = intlRateOf.get(country.code);
+                    return (
+                      <tr key={country.code} className="border-t border-celeste/60">
+                        <td className="p-3 font-semibold text-navy">{country.name} <span className="font-normal text-ink/50">({country.code})</span></td>
+                        <td className="p-3"><input name={`price_${country.code}`} defaultValue={rate ? plain(rate.price, rate.currency) : ""} inputMode="numeric" placeholder="Sin envío" aria-label={`Tarifa para ${country.name}`} className={`${inputClass} w-32`} /></td>
+                        <td className="p-3"><input name={`note_${country.code}`} defaultValue={rate?.zoneName ?? ""} maxLength={80} aria-label={`Mensajería y plazo para ${country.name}`} className={inputClass} /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-ink/60">Un campo de tarifa vacío significa que no se envía a ese país (si ya tenía tarifa, se quita).</p>
+            <button type="submit" className={primaryButton}>Guardar envío internacional</button>
+          </form>
+        ) : (
+          <ul className="mt-4 grid gap-1 text-sm sm:grid-cols-2">
+            {international.rates.length === 0 ? <li>Sin países configurados.</li> : international.rates.map((rate) => <li key={rate.id}><strong className="text-navy">{AMERICAS_COUNTRIES.find((c) => c.code === rate.countryCode)?.name ?? rate.countryCode}</strong> — {formatMoney(rate.price, toCurrency(rate.currency))}{rate.zoneName ? ` · ${rate.zoneName}` : ""}</li>)}
+          </ul>
+        )}
       </section>
 
       <details className="rounded-3xl border border-celeste bg-paper p-5 sm:p-7">

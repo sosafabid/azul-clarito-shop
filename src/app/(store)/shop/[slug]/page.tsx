@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { INTERNATIONAL_COLLECTION_SLUG } from "@/domain/shipping";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
@@ -89,6 +90,13 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
                 size: sizeValueOf(variant.options),
               }))}
             />
+            {product.productType !== "DIGITAL" && (
+              <p className="mt-4 text-sm text-ink/70">
+                {product.collections.some((collection) => collection.slug === INTERNATIONAL_COLLECTION_SLUG)
+                  ? "Envío a Costa Rica y a países de América."
+                  : "Envío solo dentro de Costa Rica."}
+              </p>
+            )}
             {product.productType === "DIGITAL" && (
               <p className="mt-4 rounded-2xl bg-aqua/15 p-4 text-sm leading-relaxed text-navy">
                 <strong>Libro digital (PDF).</strong> Sin envío: apenas se confirme tu pago podés descargarlo desde la página de tu pedido y te enviamos el enlace por correo.

@@ -134,6 +134,59 @@ describe("impuestos", () => {
   });
 });
 
+describe("envío internacional (América, solo merch, tarifa por país)", () => {
+  const intl = (rates: RateCandidate[] = [rate({ id: "ri-mx", methodId: "mi", countryCode: "MX", price: 18_000, note: "DHL · 7–12 días" })]) =>
+    method({ id: "mi", code: "envio-internacional", name: "Envío internacional" }, rates);
+  const MX: Destination = { country: "MX", province: "CDMX", city: "Ciudad de México", postalCode: "06600" };
+  const merch = (over: Partial<TotalsLineInput> = {}) => line({ shipsAbroad: true, name: "Camiseta", ...over });
+  const abroad = (over: Partial<Parameters<typeof computeTotals>[0]> = {}) =>
+    computeTotals({ currency: "CRC", lines: [merch()], tax: null, destination: MX, methods: [method(), intl()], selectedMethodId: null, ...over });
+
+  it("merch a un país con tarifa: usa la tarifa de ESE país y la nota", () => {
+    const t = abroad();
+    expect(t.shipping.state).toBe("selected");
+    expect(t.shipping.method?.name).toBe("Envío internacional");
+    expect(t.shipping.selected).toMatchObject({ amount: 18_000, note: "DHL · 7–12 días" });
+    expect(t.total).toBe(28_000);
+    expect(t.snapshot?.shipping).toMatchObject({ methodId: "mi", amount: 18_000, destination: MX });
+  });
+  it("país de América sin tarifa: no hay total ni se puede pagar", () => {
+    const t = abroad({ destination: { ...MX, country: "PE" } });
+    expect(t.shipping.state).toBe("not_configured");
+    expect(t.total).toBeNull();
+    expect(t.canProceed).toBe(false);
+  });
+  it("un producto que no es merch bloquea el envío al exterior y se dice cuál", () => {
+    const t = abroad({ lines: [merch(), line({ lineId: "l2", productId: "p2", name: "Llavero" })] });
+    expect(t.shipping.state).toBe("domestic_only");
+    expect(t.shipping.restrictedNames).toEqual(["Llavero"]);
+    expect(t.total).toBeNull();
+    expect(t.canProceed).toBe(false);
+  });
+  it("a Costa Rica se envía todo, merch o no, con la tarifa nacional", () => {
+    const t = computeTotals({ currency: "CRC", lines: [merch(), line({ lineId: "l2", productId: "p2" })], tax: null, destination: CR, methods: [method(), intl()], selectedMethodId: null });
+    expect(t.shipping.state).toBe("selected");
+    expect(t.shipping.method?.name).toBe("Envío estándar");
+    expect(t.shipping.amount).toBe(2_500);
+  });
+  it("una tarifa sin país (cualquier país) nunca aplica al exterior", () => {
+    const t = abroad({ methods: [method(), intl([rate({ id: "r-any", methodId: "mi", countryCode: null, price: 1 })])] });
+    expect(t.shipping.state).toBe("not_configured");
+  });
+  it("un libro digital en el carrito no bloquea el merch al exterior", () => {
+    const t = abroad({ lines: [merch(), line({ lineId: "l2", productId: "p2", fulfillment: "DIGITAL", name: "Libro" })] });
+    expect(t.shipping.state).toBe("selected");
+  });
+  it("el IVA se calcula igual que en Costa Rica", () => {
+    const t = abroad({ tax: tax() });
+    expect(t.tax.amount).toBe(1_000);
+    expect(t.total).toBe(10_000 + 1_000 + 18_000);
+  });
+  it("sin método internacional activo no se envía al exterior", () => {
+    expect(abroad({ methods: [method()] }).shipping.state).toBe("not_configured");
+  });
+});
+
 describe("envío (solo Costa Rica, un único 'Envío nacional')", () => {
   it("sin provincia: no se muestra un valor inventado, pero sí el método (nombre y descripción)", () => {
     const t = calc({ destination: null, selectedMethodId: null });
@@ -151,8 +204,8 @@ describe("envío (solo Costa Rica, un único 'Envío nacional')", () => {
     expect(t.canProceed).toBe(true);
     expect(t.snapshot?.shipping).toMatchObject({ methodId: "m1", amount: 2_500, freeApplied: false });
   });
-  it("el BACKEND rechaza cualquier país distinto de Costa Rica (aunque la pantalla no lo permita)", () => {
-    for (const country of ["US", "MX", "ES", "cr-x"]) {
+  it("el BACKEND rechaza cualquier país que no sea Costa Rica ni de América (aunque la pantalla no lo permita)", () => {
+    for (const country of ["ES", "FR", "JP", "cr-x"]) {
       const t = calc({ destination: { country, province: "San José", city: null, postalCode: null } });
       expect(t.shipping.state).toBe("unsupported_country");
       expect(t.shipping.options).toHaveLength(0);

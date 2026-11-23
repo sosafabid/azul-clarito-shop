@@ -1,6 +1,6 @@
 import { isUuid } from "./ids";
 import { isSupportedCurrency, parseMoneyInput, type CurrencyCode } from "./money";
-import { SHIPPING_TYPES, STORE_COUNTRY, type ShippingType } from "./shipping";
+import { AMERICAS_COUNTRIES, SHIPPING_TYPES, STORE_COUNTRY, type ShippingType } from "./shipping";
 import { slugify } from "./slug";
 import { TAX_ROUNDING_MODES, TAX_RULE_SCOPES, TAX_TREATMENTS, parsePercentToBps, type TaxRounding, type TaxRuleScope, type TaxTreatment } from "./tax";
 
@@ -155,4 +155,36 @@ export function parseNationalShippingForm(input: Input): FormResult<ParsedNation
     else price = parsed.amount;
   }
   return done(errors, () => ({ name, description: description || null, price, currency: (currencyOk ? currencyRaw : "CRC") as CurrencyCode, active: input.active === "on" }));
+}
+
+// ── Envío internacional (América, solo merch): una tarifa fija por país ──
+export type ParsedInternationalRate = { countryCode: string; price: number; note: string | null };
+export type ParsedInternationalShipping = { description: string | null; active: boolean; rates: ParsedInternationalRate[]; /** Países con tarifa vacía: se quitan. */ removed: string[] };
+
+/**
+ * Formulario del panel: por cada país de América, `price_XX` (vacío = no se envía) y `note_XX` (mensajería y plazo, se le muestra a la clienta).
+ * Los códigos de país los fija el SERVIDOR (lista de América): lo que llegue fuera de la lista se ignora. Siempre en colones.
+ */
+export function parseInternationalShippingForm(input: Input): FormResult<ParsedInternationalShipping> {
+  const errors: Record<string, string> = {};
+  const description = text(input, "description");
+  if (description.length > 300) errors.description = "La descripción admite hasta 300 caracteres.";
+  const rates: ParsedInternationalRate[] = [];
+  const removed: string[] = [];
+  for (const country of AMERICAS_COUNTRIES) {
+    const raw = text(input, `price_${country.code}`);
+    if (raw === "") {
+      removed.push(country.code);
+      continue;
+    }
+    const parsed = parseMoneyInput(raw, "CRC");
+    if (!parsed.ok) {
+      errors[`price_${country.code}`] = `${country.name}: ${parsed.error}`;
+      continue;
+    }
+    const note = text(input, `note_${country.code}`).replace(/\s+/g, " ");
+    if (note.length > 80) errors[`note_${country.code}`] = `${country.name}: la nota admite hasta 80 caracteres.`;
+    rates.push({ countryCode: country.code, price: parsed.amount, note: note || null });
+  }
+  return done(errors, () => ({ description: description || null, active: input.active === "on", rates, removed }));
 }

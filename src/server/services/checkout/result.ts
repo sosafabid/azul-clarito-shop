@@ -5,6 +5,7 @@ import type { Database } from "@/db/client";
 import { orderItems, orderNotifications, orders, paymentEvents, payments } from "@/db/schema";
 import { digitalItemsForPage, isOrderPaid } from "@/server/services/digital/delivery";
 import { findPaymentByToken } from "@/server/services/payments/session";
+import { countryName } from "@/domain/shipping";
 
 /**
  * Datos de la página de resultado, por token privado. Devuelve SOLO lo que la clienta ve (nunca costos, referencias del
@@ -66,7 +67,7 @@ export async function loadCheckoutResult(db: Database, token: string): Promise<C
     taxTotal: order.taxTotal,
     shippingTotal: order.shippingTotal,
     total: order.total,
-    destination: [address.district, address.city, address.stateProvince].filter(Boolean).join(", "),
+    destination: [address.district, address.city, address.stateProvince, address.countryCode && address.countryCode !== "CR" ? countryName(address.countryCode) : null].filter(Boolean).join(", "),
     items,
     view,
     chargedWhileCancelled: view === "cancelled" && order.paymentReviewReason !== null,

@@ -1,4 +1,4 @@
-import { STORE_COUNTRY, resolveRate, type Destination, type RateCandidate, type ShippingType } from "./shipping";
+import { INTERNATIONAL_METHOD_CODE, STORE_COUNTRY, isAmericasCountry, resolveRate, type Destination, type RateCandidate, type ShippingType } from "./shipping";
 import type { ProductType } from "./fulfillment";
 import { isTaxable, lineTax, type TaxRounding, type TaxRuleInput } from "./tax";
 
@@ -35,6 +35,8 @@ export type TotalsLineInput = {
   status: "ok" | "insufficient" | "unavailable";
   /** PHYSICAL (por defecto) o DIGITAL. Solo las líneas físicas cuentan para el envío. */
   fulfillment?: ProductType;
+  /** true = se puede enviar fuera de Costa Rica (merch). Por defecto, no. */
+  shipsAbroad?: boolean;
 };
 
 export type MethodInput = {
@@ -60,18 +62,21 @@ export type ShippingOption = {
   free: boolean;
   estimatedDaysMin: number | null;
   estimatedDaysMax: number | null;
+  /** Nota de la tarifa que se le muestra a la clienta (envío internacional: mensajería y plazo del país). */
+  note?: string | null;
 };
 
 export type CheckoutBlocker = { code: "empty_cart" | "line_unavailable" | "line_insufficient"; message: string; lineId?: string };
 
 /**
  * needs_destination    → falta elegir la provincia
- * unsupported_country  → el destino no es Costa Rica (por ahora solo se envía dentro del país)
+ * unsupported_country  → el destino no es Costa Rica ni un país de América
+ * domestic_only         → el destino es del exterior pero hay productos que solo se envían dentro de Costa Rica (ver `restrictedNames`)
  * not_configured       → todavía no hay una tarifa de envío configurada para ese destino
  * selected             → listo (el único método disponible se aplica solo)
  * not_required         → el pedido es solo de productos digitales: no hay envío (₡0) ni se necesita elegir método
  */
-export type ShippingState = "needs_destination" | "unsupported_country" | "not_configured" | "selected" | "not_required";
+export type ShippingState = "needs_destination" | "unsupported_country" | "domestic_only" | "not_configured" | "selected" | "not_required";
 
 export type PricingSnapshot = {
   version: 1;
@@ -110,6 +115,8 @@ export type CheckoutTotals = {
     /** El método nacional (nombre y descripción editables en el panel), exista o no tarifa para el destino. */
     method: { id: string; code: string; name: string; description: string | null; type: ShippingType } | null;
     options: ShippingOption[];
+    /** Productos físicos del carrito que no se pueden enviar al país elegido (solo cuando `state` es `domestic_only`). */
+    restrictedNames: string[];
     /** "Retiro en persona" si hay un método de retiro activo (se ofrece aunque falte la provincia); `null` si no se ofrece. */
     pickup: ShippingOption | null;
     /** Lo que la clienta eligió: entrega a domicilio (por defecto) o retiro en persona. */
@@ -132,7 +139,12 @@ export type CheckoutTotals = {
 
 /** El método que la clienta ve: el primero ACTIVO de entrega a domicilio, por prioridad y luego por nombre. */
 export function pickNationalMethod(methods: readonly MethodInput[]): MethodInput | null {
-  return [...methods].filter((m) => m.type === "DELIVERY").sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))[0] ?? null;
+  return [...methods].filter((m) => m.type === "DELIVERY" && m.code !== INTERNATIONAL_METHOD_CODE).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))[0] ?? null;
+}
+
+/** El método de envío internacional (código fijo), si está activo. */
+export function pickInternationalMethod(methods: readonly MethodInput[]): MethodInput | null {
+  return methods.find((m) => m.type === "DELIVERY" && m.code === INTERNATIONAL_METHOD_CODE) ?? null;
 }
 
 /** El método de retiro en persona que se ofrece: el primero ACTIVO de tipo retiro, por prioridad y luego por nombre. */
@@ -189,14 +201,27 @@ export function computeTotals(input: {
   // activo de tipo entrega a domicilio, por prioridad. Cómo se envía de verdad (Correos u otro) es manual y no cambia
   // lo que ve ni lo que paga la clienta.
   const national = pickNationalMethod(input.methods);
-  const unsupportedCountry = destination !== null && destination.country.toUpperCase() !== STORE_COUNTRY;
+  const international = pickInternationalMethod(input.methods);
+  const abroad = destination !== null && destination.country.toUpperCase() !== STORE_COUNTRY;
+  const unsupportedCountry = abroad && !isAmericasCountry(destination.country);
+  // Al exterior solo viaja el merch: si hay algún producto físico que no lo es, no se puede enviar (se dice cuáles).
+  const restrictedNames = abroad && !unsupportedCountry ? priced.filter((p) => (p.line.fulfillment ?? "PHYSICAL") === "PHYSICAL" && !p.line.shipsAbroad).map((p) => p.line.name) : [];
   const options: ShippingOption[] = [];
-  if (shippingRequired && destination && !unsupportedCountry && national) {
+  if (shippingRequired && destination && !unsupportedCountry && !abroad && national) {
     const resolved = resolveRate(national.rates, destination, physicalSubtotal, currency);
     if (resolved) {
       options.push({ methodId: national.id, code: national.code, name: national.name, description: national.description, type: national.type, rateId: resolved.rate.id, amount: resolved.amount, free: resolved.free, estimatedDaysMin: national.estimatedDaysMin, estimatedDaysMax: national.estimatedDaysMax });
     }
   }
+  if (shippingRequired && destination && abroad && !unsupportedCountry && restrictedNames.length === 0 && international) {
+    // Solo cuentan las tarifas de ESE país (una tarifa "cualquier país" nunca aplica al exterior).
+    const ofCountry = international.rates.filter((rate) => rate.countryCode !== null && rate.countryCode.toUpperCase() === destination.country.toUpperCase());
+    const resolved = resolveRate(ofCountry, destination, physicalSubtotal, currency);
+    if (resolved) {
+      options.push({ methodId: international.id, code: international.code, name: international.name, description: international.description, type: international.type, rateId: resolved.rate.id, amount: resolved.amount, free: resolved.free, estimatedDaysMin: international.estimatedDaysMin, estimatedDaysMax: international.estimatedDaysMax, note: resolved.rate.note ?? null });
+    }
+  }
+  const displayMethod = abroad ? international : national;
   // Retiro en persona: no necesita dirección de entrega. Cuesta lo que diga una tarifa "todo el país" del método; sin tarifa, ₡0.
   const pickupMethod = pickPickupMethod(input.methods);
   let pickup: ShippingOption | null = null;
@@ -209,7 +234,7 @@ export function computeTotals(input: {
   // Sin método de entrega a domicilio configurado, el retiro es lo único que se puede elegir.
   const choice: "DELIVERY" | "PICKUP" = pickup && (input.choice === "PICKUP" || !national) ? "PICKUP" : "DELIVERY";
   const selected = requested !== null ? (options.find((o) => o.methodId === requested) ?? null) : choice === "PICKUP" ? pickup : (options.find((o) => o.type === "DELIVERY") ?? null);
-  const state: ShippingState = !shippingRequired ? "not_required" : selected ? "selected" : unsupportedCountry ? "unsupported_country" : !destination ? "needs_destination" : "not_configured";
+  const state: ShippingState = !shippingRequired ? "not_required" : selected ? "selected" : unsupportedCountry ? "unsupported_country" : restrictedNames.length > 0 ? "domestic_only" : !destination ? "needs_destination" : "not_configured";
   const selectionInvalid = requested !== null && selected === null;
 
   const shippingAmount = !shippingRequired ? 0 : selected ? selected.amount : null;
@@ -242,8 +267,9 @@ export function computeTotals(input: {
     tax: { applied: tax !== null, name: tax?.name ?? null, rateBps: tax?.rateBps ?? null, amount: taxAmount, included },
     shipping: {
       state,
-      method: national ? { id: national.id, code: national.code, name: national.name, description: national.description, type: national.type } : null,
+      method: displayMethod ? { id: displayMethod.id, code: displayMethod.code, name: displayMethod.name, description: displayMethod.description, type: displayMethod.type } : null,
       options,
+      restrictedNames,
       pickup,
       choice,
       selected,

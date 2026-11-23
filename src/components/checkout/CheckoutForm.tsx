@@ -18,6 +18,8 @@ export type CheckoutFormProps = {
   mode: "shipping" | "billing";
   /** Retiro en persona: se pide la dirección de facturación (no hay entrega) y se avisa al servidor con `entrega=retiro`. */
   pickup?: boolean;
+  /** País de entrega (ISO alpha-2). Fuera de Costa Rica se piden estado/ciudad en texto libre y el distrito es opcional. */
+  country?: string;
   province: string;
   city: string;
   postalCode: string;
@@ -25,7 +27,7 @@ export type CheckoutFormProps = {
   defaults: { name: string; email: string };
 };
 
-export function CheckoutForm({ mode, pickup = false, province, city, postalCode, seenTotal, defaults }: CheckoutFormProps) {
+export function CheckoutForm({ mode, pickup = false, country = "CR", province, city, postalCode, seenTotal, defaults }: CheckoutFormProps) {
   const [state, action, pending] = useActionState(startPaymentAction, null);
   const errors = state?.errors ?? {};
   return (
@@ -39,6 +41,7 @@ export function CheckoutForm({ mode, pickup = false, province, city, postalCode,
       </div>
       {mode === "shipping" ? (
         <>
+          <input type="hidden" name="country" value={country} />
           <input type="hidden" name="province" value={province} />
           <input type="hidden" name="city" value={city} />
           <input type="hidden" name="postalCode" value={postalCode} />
@@ -59,8 +62,8 @@ export function CheckoutForm({ mode, pickup = false, province, city, postalCode,
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Nombre y apellido" error={errors.name}><input name="name" autoComplete="name" required maxLength={120} defaultValue={defaults.name} className={inputClass} /></Field>
         <Field label="Correo electrónico" error={errors.email} hint="Acá te enviamos la confirmación."><input name="email" type="email" autoComplete="email" required maxLength={254} defaultValue={defaults.email} className={inputClass} /></Field>
-        <Field label="Teléfono" error={errors.phone} hint={pickup ? "Para coordinar el retiro de tu pedido." : mode === "billing" ? "Para contactarte si hay un problema con el pago." : "Para coordinar la entrega."}><input name="phone" type="tel" autoComplete="tel" required maxLength={20} className={inputClass} /></Field>
-        <Field label="Distrito" error={errors.district}><input name="district" required maxLength={80} className={inputClass} /></Field>
+        <Field label="Teléfono" error={errors.phone} hint={country !== "CR" && mode === "shipping" ? "Con código de tu país (ej. +1 555 123 4567). Para coordinar la entrega." : pickup ? "Para coordinar el retiro de tu pedido." : mode === "billing" ? "Para contactarte si hay un problema con el pago." : "Para coordinar la entrega."}><input name="phone" type="tel" autoComplete="tel" required maxLength={20} className={inputClass} /></Field>
+        <Field label={country !== "CR" && mode === "shipping" ? "Distrito o barrio (opcional)" : "Distrito"} error={errors.district}><input name="district" required={!(country !== "CR" && mode === "shipping")} maxLength={80} className={inputClass} /></Field>
       </div>
       <Field label={mode === "billing" ? "Dirección de facturación" : "Dirección exacta"} error={errors.line1}><input name="line1" autoComplete="address-line1" required maxLength={200} className={inputClass} /></Field>
       <Field label="Más señas (opcional)" error={errors.line2}><input name="line2" autoComplete="address-line2" maxLength={200} className={inputClass} /></Field>

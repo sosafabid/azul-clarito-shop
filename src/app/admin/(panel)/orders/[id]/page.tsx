@@ -13,6 +13,7 @@ import { ORDER_STATUS_TRANSITIONS } from "@/domain/order-status";
 import { can } from "@/domain/permissions";
 import { requirePermission } from "@/server/auth";
 import { FULFILLMENT_TARGETS, getAdminOrder } from "@/server/services/orders/admin";
+import { countryName } from "@/domain/shipping";
 
 export const metadata: Metadata = { title: "Pedido" };
 export const dynamic = "force-dynamic";
@@ -93,7 +94,7 @@ export default async function AdminOrderPage({ params }: { params: Promise<{ id:
         {order.pricingSnapshot?.shipping.type === "PICKUP" && <p className="mt-2 rounded-xl bg-sun/30 px-3 py-2 text-sm font-semibold text-navy">RETIRO EN PERSONA: no hay que enviar nada. Coordiná el día y la hora con la clienta (la dirección de abajo es solo de facturación).</p>}
         {!order.requiresShipping && <p className="mt-2 rounded-xl bg-aqua/15 px-3 py-2 text-sm text-navy">Pedido solo digital: no requiere envío. La dirección es la de facturación que pidió la pasarela de pago.</p>}
         <p className="mt-2 text-sm">{order.customerName ?? "—"} · <span className="break-all">{order.email}</span> · {order.customerPhone ?? "sin teléfono"}</p>
-        <p className="mt-1 text-sm">{address.line1}{address.line2 ? `, ${address.line2}` : ""} · {address.district ? `${address.district}, ` : ""}{address.city}, {address.stateProvince} · CP {address.postalCode ?? "—"} · Costa Rica</p>
+        <p className="mt-1 text-sm">{address.line1}{address.line2 ? `, ${address.line2}` : ""} · {address.district ? `${address.district}, ` : ""}{address.city}, {address.stateProvince} · CP {address.postalCode ?? "—"} · {countryName(address.countryCode)}</p>
         {order.customerNotes && <p className="mt-1 text-sm">Nota de la clienta: {order.customerNotes}</p>}
       </section>
 

@@ -3,11 +3,11 @@
 import { redirect } from "next/navigation";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
-import { parseNationalShippingForm, parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "@/domain/settings-form";
+import { parseInternationalShippingForm, parseNationalShippingForm, parseShippingMethodForm, parseShippingRateForm, parseTaxRateForm, parseTaxRuleForm } from "@/domain/settings-form";
 import { formToRecord } from "@/server/admin-forms";
 import { requirePermission } from "@/server/auth";
 import { resolveAuditActor } from "@/server/services/audit";
-import { deleteShippingRate, saveNationalShipping, saveShippingMethod, saveShippingRate, setShippingMethodActive, setShippingRateActive } from "@/server/services/settings/shipping";
+import { deleteShippingRate, saveInternationalShipping, saveNationalShipping, saveShippingMethod, saveShippingRate, setShippingMethodActive, setShippingRateActive } from "@/server/services/settings/shipping";
 import { addTaxRule, deleteTaxRule, saveTaxRate } from "@/server/services/settings/tax";
 
 /**
@@ -98,4 +98,14 @@ export async function deleteShippingRateAction(rateId: string): Promise<void> {
   if (!isDatabaseConfigured()) back(routes.adminShipping, "error", NO_DB);
   await deleteShippingRate(getDb(), rateId, resolveAuditActor(session));
   back(routes.adminShipping, "saved", "Tarifa eliminada.");
+}
+
+/** Tarifas del envío internacional (América, solo merch): un precio por país; vacío = no se envía a ese país. */
+export async function saveInternationalShippingAction(formData: FormData): Promise<void> {
+  const session = await requirePermission("settings:write");
+  if (!isDatabaseConfigured()) back(routes.adminShipping, "error", NO_DB);
+  const parsed = parseInternationalShippingForm(formToRecord(formData));
+  if (!parsed.ok) back(routes.adminShipping, "error", firstError(parsed.errors));
+  const result = await saveInternationalShipping(getDb(), parsed.data, resolveAuditActor(session));
+  back(routes.adminShipping, "saved", result.changed ? "Envío internacional guardado." : "No había cambios que guardar.");
 }

@@ -4,8 +4,8 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { Database } from "@/db/client";
 import { shippingMethods, shippingRates, type ShippingMethod, type ShippingRate } from "@/db/schema";
 import { isUuid } from "@/domain/ids";
-import type { ParsedNationalShipping, ParsedShippingMethod, ParsedShippingRate } from "@/domain/settings-form";
-import { STORE_COUNTRY } from "@/domain/shipping";
+import type { ParsedInternationalShipping, ParsedNationalShipping, ParsedShippingMethod, ParsedShippingRate } from "@/domain/settings-form";
+import { INTERNATIONAL_METHOD_CODE, INTERNATIONAL_METHOD_NAME, STORE_COUNTRY } from "@/domain/shipping";
 import { auditInsert, type AuditActor, type AuditEntry } from "@/server/services/audit";
 import { uniqueViolationConstraint } from "@/server/services/catalog/admin";
 
@@ -43,7 +43,7 @@ export type NationalShipping = { method: ShippingMethod; baseRate: ShippingRate 
 /** El método que edita el formulario simple: "envio-nacional", o el primer método de entrega por prioridad. */
 export async function findNationalShipping(db: Database): Promise<NationalShipping | null> {
   const methods = await db.select().from(shippingMethods).where(eq(shippingMethods.type, "DELIVERY")).orderBy(asc(shippingMethods.sortOrder), asc(shippingMethods.name));
-  const method = methods.find((m) => m.code === "envio-nacional") ?? methods[0];
+  const method = methods.find((m) => m.code === "envio-nacional") ?? methods.find((m) => m.code !== INTERNATIONAL_METHOD_CODE);
   if (!method) return null;
   const [baseRate] = await db
     .select()
@@ -51,7 +51,7 @@ export async function findNationalShipping(db: Database): Promise<NationalShippi
     .where(and(eq(shippingRates.methodId, method.id), eq(shippingRates.countryCode, STORE_COUNTRY), isNull(shippingRates.stateProvince), isNull(shippingRates.city), isNull(shippingRates.postalCode)))
     .orderBy(asc(shippingRates.createdAt))
     .limit(1);
-  return { method, baseRate: baseRate ?? null, otherDeliveryMethods: methods.length - 1 };
+  return { method, baseRate: baseRate ?? null, otherDeliveryMethods: methods.filter((m) => m.code !== INTERNATIONAL_METHOD_CODE).length - 1 };
 }
 
 /**
@@ -188,4 +188,70 @@ export async function deleteShippingRate(db: Database, id: string, actor: AuditA
     db.delete(shippingRates).where(eq(shippingRates.id, id)),
     auditInsert(db, actor, [{ action: "shipping.rate_deleted", entityType: "shipping_rate", entityId: id, metadata: {} }]),
   ]);
+}
+
+// ── "Envío internacional": un método con UNA tarifa fija por país de América (solo merch) ──────────
+export type InternationalShipping = { method: ShippingMethod | null; rates: ShippingRate[] };
+
+export async function findInternationalShipping(db: Database): Promise<InternationalShipping> {
+  const [method] = await db.select().from(shippingMethods).where(eq(shippingMethods.code, INTERNATIONAL_METHOD_CODE)).limit(1);
+  if (!method) return { method: null, rates: [] };
+  const rates = await db.select().from(shippingRates).where(eq(shippingRates.methodId, method.id)).orderBy(asc(shippingRates.countryCode));
+  return { method, rates };
+}
+
+/**
+ * Guarda el método internacional y sus tarifas por país. Por cada país: precio nuevo → se crea o actualiza la tarifa (en colones, sin zonas);
+ * precio vacío → se quita. `zone_name` guarda la nota para la clienta (mensajería y plazo). Todo queda en auditoría (antes → después).
+ */
+export async function saveInternationalShipping(db: Database, input: ParsedInternationalShipping, actor: AuditActor): Promise<{ ok: true; changed: boolean }> {
+  const found = await findInternationalShipping(db);
+  const methodId = found.method?.id ?? crypto.randomUUID();
+  const statements: BatchItem<"pg">[] = [];
+  const audits: AuditEntry[] = [];
+
+  if (!found.method) {
+    statements.push(db.insert(shippingMethods).values({ id: methodId, code: INTERNATIONAL_METHOD_CODE, name: INTERNATIONAL_METHOD_NAME, description: input.description, type: "DELIVERY", isActive: input.active, sortOrder: 10 }));
+    audits.push({ action: "shipping.method_created", entityType: "shipping_method", entityId: methodId, metadata: { code: INTERNATIONAL_METHOD_CODE, name: INTERNATIONAL_METHOD_NAME, active: input.active } });
+  } else {
+    const changes = changesOf({ description: found.method.description, isActive: found.method.isActive }, { description: input.description, isActive: input.active });
+    if (has(changes)) {
+      statements.push(db.update(shippingMethods).set({ description: input.description, isActive: input.active }).where(eq(shippingMethods.id, methodId)));
+      const { isActive, ...rest } = changes;
+      if (has(rest)) audits.push({ action: "shipping.method_updated", entityType: "shipping_method", entityId: methodId, metadata: { changes: rest } });
+      if (isActive) audits.push({ action: input.active ? "shipping.method_activated" : "shipping.method_deactivated", entityType: "shipping_method", entityId: methodId, metadata: {} });
+    }
+  }
+
+  const byCountry = new Map<string, ShippingRate[]>();
+  for (const rate of found.rates) byCountry.set(rate.countryCode ?? "", [...(byCountry.get(rate.countryCode ?? "") ?? []), rate]);
+
+  for (const entry of input.rates) {
+    const [current, ...extra] = byCountry.get(entry.countryCode) ?? [];
+    if (!current) {
+      const id = crypto.randomUUID();
+      statements.push(db.insert(shippingRates).values({ id, methodId, countryCode: entry.countryCode, zoneName: entry.note, price: entry.price, currency: "CRC", isActive: true }));
+      audits.push({ action: "shipping.rate_created", entityType: "shipping_rate", entityId: id, metadata: { methodId, country: entry.countryCode, price: entry.price, currency: "CRC" } });
+    } else {
+      const changes = changesOf({ price: current.price, zoneName: current.zoneName, currency: current.currency, isActive: current.isActive }, { price: entry.price, zoneName: entry.note, currency: "CRC", isActive: true });
+      if (has(changes)) {
+        statements.push(db.update(shippingRates).set({ price: entry.price, zoneName: entry.note, currency: "CRC", isActive: true }).where(eq(shippingRates.id, current.id)));
+        audits.push({ action: "shipping.rate_changed", entityType: "shipping_rate", entityId: current.id, metadata: { methodId, country: entry.countryCode, ...changes } });
+      }
+    }
+    // Si por la vía avanzada quedaron tarifas repetidas del mismo país, se limpian: una sola por país.
+    for (const duplicate of extra) {
+      statements.push(db.delete(shippingRates).where(eq(shippingRates.id, duplicate.id)));
+      audits.push({ action: "shipping.rate_deleted", entityType: "shipping_rate", entityId: duplicate.id, metadata: { methodId, country: entry.countryCode } });
+    }
+  }
+  for (const code of input.removed) {
+    for (const rate of byCountry.get(code) ?? []) {
+      statements.push(db.delete(shippingRates).where(eq(shippingRates.id, rate.id)));
+      audits.push({ action: "shipping.rate_deleted", entityType: "shipping_rate", entityId: rate.id, metadata: { methodId, country: code } });
+    }
+  }
+
+  await commit(db, statements, audits, actor);
+  return { ok: true, changed: audits.length > 0 };
 }

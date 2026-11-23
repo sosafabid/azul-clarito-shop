@@ -420,28 +420,31 @@ describe("checkout, impuestos y envíos", () => {
   });
 });
 
-describe("envíos solo Costa Rica y logística manual", () => {
+describe("envíos: Costa Rica (todo) + América (solo merch) y logística manual", () => {
   const publicFiles = () =>
     all.filter((p) => ["src/app/(store)/", "src/components/shop/", "src/components/ui/", "src/components/layout/", "src/components/home/", "src/components/account/", "src/components/cart/"].some((prefix) => rel(p).startsWith(prefix)));
 
-  it("el checkout no tiene selector de países ni campo de país editable", () => {
+  it("el checkout ofrece el selector de país (Costa Rica + América) y explica la restricción del merch", () => {
     const source = stripComments(read(join(SRC, "app/(store)/checkout/page.tsx")));
-    expect(source).not.toMatch(/name="pais"|COUNTRY_CODES|countryName|list="paises"|<datalist/);
-    expect(source).toMatch(/STORE_COUNTRY_NAME/);
+    expect(source).toMatch(/CountrySelect/);
     expect(source).toMatch(/COUNTRY_ONLY_MESSAGE/);
+    expect(stripComments(read(join(SRC, "components/checkout/CountrySelect.tsx")))).toMatch(/AMERICAS_COUNTRIES/);
   });
 
-  it("el país se valida en el BACKEND: parseDestination y el motor rechazan todo lo que no sea Costa Rica", () => {
+  it("el país se valida en el BACKEND: parseDestination, el formulario y el motor rechazan lo que no sea Costa Rica ni América", () => {
     expect(stripComments(read(join(SRC, "domain/shipping.ts")))).toMatch(/countryRejected: true/);
     expect(stripComments(read(join(SRC, "domain/checkout.ts")))).toMatch(/unsupported_country/);
-    expect(stripComments(read(join(SRC, "domain/settings-form.ts")))).toMatch(/countryCode: STORE_COUNTRY/);
+    expect(stripComments(read(join(SRC, "domain/checkout.ts")))).toMatch(/domestic_only/);
+    expect(stripComments(read(join(SRC, "domain/checkout-form.ts")))).toMatch(/isAmericasCountry/);
   });
 
-  it("no existe ninguna lista de países ni código de envíos internacionales", () => {
-    for (const file of all.filter((p) => !/\.test\.ts$/.test(p))) expect(stripComments(read(file)), rel(file)).not.toMatch(/COUNTRY_CODES|isCountryCode|countryName\(/);
+  it("el merch se decide en el servidor (colección 'merch'), no con un dato que mande el navegador", () => {
+    expect(stripComments(read(join(SRC, "server/services/checkout/totals.ts")))).toMatch(/INTERNATIONAL_COLLECTION_SLUG/);
+    for (const file of all.filter((p) => /actions\/checkout\.ts$/.test(p))) expect(stripComments(read(file))).not.toMatch(/shipsAbroad/);
   });
 
-  it("el panel de tarifas ya no ofrece un campo de país", () => {
+  it("el panel guarda las tarifas internacionales con país fijado por el servidor (lista de América), siempre en colones", () => {
+    expect(stripComments(read(join(SRC, "domain/settings-form.ts")))).toMatch(/AMERICAS_COUNTRIES/);
     expect(stripComments(read(join(SRC, "app/admin/(panel)/shipping/page.tsx")))).not.toMatch(/name="country"|list="paises"/);
   });
 

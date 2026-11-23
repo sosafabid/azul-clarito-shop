@@ -1,4 +1,4 @@
-import { CR_PROVINCES, STORE_COUNTRY } from "./shipping";
+import { CR_PROVINCES, STORE_COUNTRY, isAmericasCountry } from "./shipping";
 import { crStateCode } from "./tilopay";
 
 /**
@@ -10,6 +10,8 @@ export type CheckoutFormInput = {
   name: string;
   email: string;
   phone: string;
+  /** País de entrega (ISO alpha-2): Costa Rica o un país de América. Fuera de Costa Rica solo se vende merch. */
+  country: string;
   province: string;
   city: string;
   district: string;
@@ -44,6 +46,7 @@ export function parseCheckoutForm(formData: FormData): ParsedCheckoutForm {
     name: clean(formData.get("name"), 120),
     email: clean(formData.get("email"), 254).toLowerCase(),
     phone: clean(formData.get("phone"), 20),
+    country: clean(formData.get("country"), 2).toUpperCase() || STORE_COUNTRY,
     province: clean(formData.get("province"), 40),
     city: clean(formData.get("city"), 80),
     district: clean(formData.get("district"), 80),
@@ -58,14 +61,24 @@ export function parseCheckoutForm(formData: FormData): ParsedCheckoutForm {
   if (input.name.length < 2 || !input.name.includes(" ")) errors.name = "Escribí tu nombre y apellido.";
   if (!EMAIL.test(input.email)) errors.email = "Revisá tu correo electrónico.";
   if (!/^\+?[\d\s-]{7,20}$/.test(input.phone) || input.phone.replace(/\D/g, "").length < 8) errors.phone = "Escribí un teléfono válido (al menos 8 dígitos).";
-  if (!(CR_PROVINCES as readonly string[]).includes(input.province) || crStateCode(input.province) === null) errors.province = "Elegí una provincia de Costa Rica.";
-  if (input.city.length < 2) errors.city = "Escribí tu cantón.";
-  if (input.district.length < 2) errors.district = "Escribí tu distrito.";
-  if (!/^\d{5}$/.test(input.postalCode)) errors.postalCode = "El código postal tiene 5 dígitos.";
+  const abroad = input.country !== STORE_COUNTRY;
+  if (abroad && !isAmericasCountry(input.country)) errors.country = "Elegí un país de América.";
+  if (!abroad) {
+    if (!(CR_PROVINCES as readonly string[]).includes(input.province) || crStateCode(input.province) === null) errors.province = "Elegí una provincia de Costa Rica.";
+    if (input.city.length < 2) errors.city = "Escribí tu cantón.";
+    if (input.district.length < 2) errors.district = "Escribí tu distrito.";
+    if (!/^\d{5}$/.test(input.postalCode)) errors.postalCode = "El código postal tiene 5 dígitos.";
+  } else {
+    // Fuera de Costa Rica: estado/provincia y ciudad en texto libre; el código postal sigue siendo obligatorio (la pasarela lo exige).
+    if (input.province.length < 2) errors.province = "Escribí tu estado o provincia.";
+    if (input.city.length < 2) errors.city = "Escribí tu ciudad.";
+    if (!/^[A-Za-z0-9][A-Za-z0-9 -]{1,9}$/.test(input.postalCode)) errors.postalCode = "Escribí tu código postal (entre 2 y 10 letras o números).";
+  }
   if (input.line1.length < 5) errors.line1 = "Escribí la dirección exacta (al menos 5 caracteres).";
   if (!input.acceptTerms) errors.acceptTerms = "Tenés que aceptar los términos y la política de privacidad.";
   if (Object.keys(errors).length > 0) return { ok: false, errors };
-  const stateCode = crStateCode(input.province) as string;
+  // Costa Rica: código ISO de la provincia (CR-SJ…). Fuera de Costa Rica: el texto que escribió la clienta.
+  const stateCode = abroad ? input.province : (crStateCode(input.province) as string);
   return { ok: true, value: { ...input, stateCode, ...splitName(input.name) } };
 }
 

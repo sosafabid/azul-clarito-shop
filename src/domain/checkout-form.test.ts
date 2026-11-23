@@ -53,3 +53,25 @@ describe("splitName", () => {
     expect(splitName("Ana María Soto Rojas")).toEqual({ firstName: "Ana María", lastName: "Soto Rojas" });
   });
 });
+
+describe("dirección fuera de Costa Rica (América)", () => {
+  const form = (over: Record<string, string> = {}) => {
+    const data = new FormData();
+    const base: Record<string, string> = { name: "Ana Pérez", email: "ana@example.com", phone: "+52 55 1234 5678", country: "MX", province: "CDMX", city: "Ciudad de México", postalCode: "06600", line1: "Calle Reforma 100", acceptTerms: "on" };
+    for (const [key, value] of Object.entries({ ...base, ...over })) data.set(key, value);
+    return parseCheckoutForm(data);
+  };
+  it("acepta estado y ciudad en texto libre, código postal alfanumérico y sin distrito", () => {
+    const result = form();
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toMatchObject({ country: "MX", stateCode: "CDMX" });
+  });
+  it("rechaza países fuera de América y códigos postales vacíos", () => {
+    expect(form({ country: "ES" }).ok).toBe(false);
+    expect(form({ postalCode: "" }).ok).toBe(false);
+  });
+  it("Costa Rica sigue exigiendo provincia, distrito y código de 5 dígitos", () => {
+    expect(form({ country: "CR", province: "Limón", district: "" }).ok).toBe(false);
+    expect(form({ country: "CR", province: "Limón", district: "Limón", postalCode: "70101" }).ok).toBe(true);
+  });
+});

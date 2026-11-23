@@ -10,6 +10,7 @@ import { DOWNLOAD_LINK_RULES } from "@/domain/fulfillment";
 import { orderHasDigital, prepareEmailDownloads } from "@/server/services/digital/delivery";
 import { getEmailService } from "@/server/services/email/service";
 import type { OrderSummaryEmailData } from "@/server/services/email/events";
+import { countryName } from "@/domain/shipping";
 
 /**
  * CORREOS DE COMPRA — idempotentes.
@@ -76,7 +77,7 @@ async function loadOrder(db: Database, orderId: string): Promise<LoadedOrder | n
       shippingTotal: order.shippingTotal,
       taxTotal: order.taxTotal,
       taxIncluded: order.pricingSnapshot?.tax.included ?? false,
-      destination: [address.district, address.city, address.stateProvince].filter(Boolean).join(", "),
+      destination: [address.district, address.city, address.stateProvince, address.countryCode && address.countryCode !== "CR" ? countryName(address.countryCode) : null].filter(Boolean).join(", "),
       requiresShipping: order.requiresShipping,
       pickup: isPickupSnapshot(order.pricingSnapshot),
       hasDigital: items.some((item) => item.fulfillmentType === "DIGITAL"),

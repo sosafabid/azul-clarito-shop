@@ -96,7 +96,8 @@ export async function openPaymentSession(db: Database, orderId: string, source: 
 
   const address = order.shippingAddress;
   const { firstName, lastName } = splitName(order.customerName ?? "");
-  const stateCode = crStateCode(address.stateProvince);
+  // Costa Rica: código ISO de la provincia. Fuera de Costa Rica: el estado/provincia tal como lo escribió la clienta.
+  const stateCode = address.countryCode.toUpperCase() === "CR" ? crStateCode(address.stateProvince) : address.stateProvince.trim() || null;
   if (!stateCode) {
     await recordPaymentEvent(db, { orderId, paymentId: target.id, source, type: "session_failed", detail: { kind: "invalid_state" } });
     return { kind: "failed", reason: "provider", token };

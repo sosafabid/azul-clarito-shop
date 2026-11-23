@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "drizzle-orm";
 import type { Database } from "@/db/client";
+import { countryName } from "@/domain/shipping";
 
 /**
  * PEDIDOS DE LA CLIENTA con sesión. Solo se leen los suyos:
@@ -84,7 +85,7 @@ export async function getCustomerOrder(db: Database, viewer: CustomerOrderViewer
     select name_snapshot, variant_options_snapshot, quantity, unit_price_snapshot, line_total, fulfillment_type::text as fulfillment
       from order_items where order_id = ${o.id as string}::uuid order by created_at, id
   `);
-  const address = o.shipping_address as { city?: string; stateProvince?: string; district?: string | null; line1?: string } | null;
+  const address = o.shipping_address as { city?: string; stateProvince?: string; district?: string | null; line1?: string; countryCode?: string } | null;
   const requiresShipping = Boolean(o.requires_shipping);
   return {
     orderNumber: String(o.order_number),
@@ -106,7 +107,7 @@ export async function getCustomerOrder(db: Database, viewer: CustomerOrderViewer
     shippedAt: toDate(o.shipped_at as string | null),
     deliveredAt: toDate(o.delivered_at as string | null),
     cancelledAt: toDate(o.cancelled_at as string | null),
-    destination: requiresShipping && o.is_pickup !== true && address ? [address.line1, address.district, address.city, address.stateProvince].filter(Boolean).join(", ") : null,
+    destination: requiresShipping && o.is_pickup !== true && address ? [address.line1, address.district, address.city, address.stateProvince, address.countryCode && address.countryCode !== "CR" ? countryName(address.countryCode) : null].filter(Boolean).join(", ") : null,
     items: (items.rows as Record<string, unknown>[]).map((i) => ({
       name: String(i.name_snapshot),
       variantOptions: (i.variant_options_snapshot as Record<string, string> | null) ?? null,
