@@ -5,6 +5,10 @@
 
 export type BlogBlock =
   | { type: "p"; text: string }
+  /** Subtítulo H3 dentro de una sección (H2). */
+  | { type: "h3"; text: string }
+  /** Cita o detalle destacado, estilo revista. */
+  | { type: "quote"; text: string }
   | { type: "list"; items: string[] }
   | { type: "bullets"; items: { lead: string; text: string }[] }
   | { type: "faceGuide"; items: { shape: string; text: string }[] }
@@ -80,13 +84,46 @@ export function validateBlogPost(post: BlogPost): string[] {
   return issues;
 }
 
+/** Enlaces internos dentro del texto: `[texto](/ruta)`. Solo rutas del propio sitio (empiezan con "/"). */
+export const INLINE_LINK = /\[([^\]]+)\]\((\/[^)\s]*)\)/g;
+
+export type InlinePart = { text: string; href?: string };
+
+/** Parte un texto en trozos normales y enlaces internos (puro, para poder probarlo). */
+export function parseInline(text: string): InlinePart[] {
+  const parts: InlinePart[] = [];
+  let last = 0;
+  for (const match of text.matchAll(INLINE_LINK)) {
+    const index = match.index ?? 0;
+    if (index > last) parts.push({ text: text.slice(last, index) });
+    parts.push({ text: match[1], href: match[2] });
+    last = index + match[0].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last) });
+  return parts;
+}
+
+/** Texto sin la sintaxis de enlaces (para contar palabras). */
+export function stripInline(text: string): string {
+  return parseInline(text).map((part) => part.text).join("");
+}
+
+/** Rutas internas que enlaza un artículo en su texto, en orden y sin repetir. */
+export function inlineLinksOf(post: BlogPost): string[] {
+  const hrefs: string[] = [];
+  const texts: string[] = [...post.intro];
+  for (const section of post.sections) for (const block of section.blocks) if (block.type === "p" || block.type === "quote") texts.push(block.text);
+  for (const text of texts) for (const part of parseInline(text)) if (part.href && !hrefs.includes(part.href)) hrefs.push(part.href);
+  return hrefs;
+}
+
 /** Minutos de lectura aproximados (200 palabras por minuto), mínimo 1. */
 export function readingMinutes(post: BlogPost): number {
   const parts: string[] = [post.subtitle, ...post.intro];
   for (const section of post.sections) {
     parts.push(section.title);
     for (const block of section.blocks) {
-      if (block.type === "p") parts.push(block.text);
+      if (block.type === "p" || block.type === "h3" || block.type === "quote") parts.push(stripInline(block.text));
       else if (block.type === "list") parts.push(...block.items);
       else if (block.type === "faceGuide") parts.push(...block.items.map((i) => `${i.shape} ${i.text}`));
       else if (block.type === "bullets") parts.push(...block.items.map((i) => `${i.lead} ${i.text}`));

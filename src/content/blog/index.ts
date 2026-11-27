@@ -1,4 +1,7 @@
 import { validateBlogPost, type BlogPost } from "@/domain/blog";
+import { accesoriosInspiradosEnElMar } from "./accesorios-inspirados-en-el-mar";
+import { comoCuidarAnteojosDeSol } from "./como-cuidar-anteojos-de-sol";
+import { comoElegirAccesoriosLookTropical } from "./como-elegir-accesorios-look-tropical";
 import { comoElegirAnteojosDeSol } from "./como-elegir-anteojos-de-sol";
 import { regalosParaMujer } from "./regalos-para-mujer-inspiracion-caribena";
 
@@ -6,7 +9,7 @@ import { regalosParaMujer } from "./regalos-para-mujer-inspiracion-caribena";
  * Registro de artículos de Diario Azul. Para publicar uno nuevo: crear su archivo en esta carpeta (con su portada en
  * /public/blog) y agregarlo a la lista. Antes de publicar corre `npm run blog:check`; el build también lo ejecuta.
  */
-const REGISTERED: readonly BlogPost[] = [regalosParaMujer, comoElegirAnteojosDeSol];
+const REGISTERED: readonly BlogPost[] = [comoElegirAccesoriosLookTropical, comoCuidarAnteojosDeSol, accesoriosInspiradosEnElMar, regalosParaMujer, comoElegirAnteojosDeSol];
 
 /** Todos los artículos registrados, del más reciente al más antiguo (con la misma fecha, queda primero el que está antes en la lista). Solo para validar. */
 export const ALL_BLOG_POSTS: readonly BlogPost[] = [...REGISTERED].sort((a, b) => b.date.localeCompare(a.date));

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_BLOG_POSTS, BLOG_POSTS, getBlogPost } from "@/content/blog";
-import { validateBlogPost, type BlogPost, buildBlogPostingJsonLd, buildBreadcrumbJsonLd, formatPostDate, productSlugsOf, readingMinutes, serializeJsonLd } from "./blog";
+import { validateBlogPost, type BlogPost, buildBlogPostingJsonLd, buildBreadcrumbJsonLd, formatPostDate, productSlugsOf, readingMinutes, serializeJsonLd, inlineLinksOf, parseInline, stripInline } from "./blog";
 
 const post = getBlogPost("como-elegir-anteojos-de-sol")!;
 const gifts = getBlogPost("regalos-para-mujer-inspiracion-caribena")!;
@@ -99,8 +99,9 @@ describe("Diario Azul: artículo de regalos para mujer", () => {
   it("no incluye precios ni medidas", () => {
     expect(JSON.stringify(gifts)).not.toMatch(/₡|\bCRC\b|\bcm\b|\bmm\b|gramos/i);
   });
-  it("el más reciente (misma fecha: el primero de la lista) aparece primero en el índice", () => {
-    expect(BLOG_POSTS.map((p) => p.slug)).toEqual(["regalos-para-mujer-inspiracion-caribena", "como-elegir-anteojos-de-sol"]);
+  it("con la misma fecha, el primero de la lista aparece primero en el índice", () => {
+    const order = BLOG_POSTS.map((p) => p.slug);
+    expect(order.indexOf("regalos-para-mujer-inspiracion-caribena")).toBeLessThan(order.indexOf("como-elegir-anteojos-de-sol"));
   });
 });
 
@@ -131,5 +132,81 @@ describe("regla permanente: portada obligatoria", () => {
   it("cada artículo usa una portada distinta", () => {
     const srcs = ALL_BLOG_POSTS.map((p) => p.image.src);
     expect(new Set(srcs).size).toBe(srcs.length);
+  });
+});
+
+/** Productos que existen hoy en la tienda (26 de noviembre de 2026). Guarda contra errores de tipeo en los enlaces de los artículos. */
+const CATALOG_SLUGS = new Set([
+  "prensa-flor-de-mar", "ama-s", "cuaderno-seashell-vintage", "cuaderno-atardecer-de-mar", "bolsa-conchita-de-mar", "baby-bag-estrellitas-de-mar",
+  "prensita-conchita-de-mar", "prensita-caracol-de-mar", "tutty-gorra", "tuttytote", "post-its-tortuguitas-de-mar", "portacepillos-conchita-de-mar",
+  "set-de-portavasos-mosaico-marino", "sandy-glow", "purple-tide", "midnight-coast", "ocean-muse", "sunset-tortoise", "little-glow-friends-set-of-3",
+  "portavasos-tortuguita", "bamboo-tootbrush", "camiseta-azul-clarito", "collar-ocean-star", "porta-vasos-memorias-de-mar", "mermaids-bracelet",
+  "crop-top-mermaids", "gorra-azul-clarito-whale", "camiseta-tortuga", "un-pedacito-de-mar", "mi-littl-chickn-cougar-cronics", "the-brief-chapter-of-you",
+  "eme-ama-s", "romanticismo-cuantico", "tattoo-tropical", "imanes-tropicales",
+]);
+
+describe("enlaces internos en el texto", () => {
+  it("parseInline separa texto y enlaces, y stripInline deja solo el texto", () => {
+    expect(parseInline("Lee [la guía](/blog/x) y [más](/shop/y).")).toEqual([{ text: "Lee " }, { text: "la guía", href: "/blog/x" }, { text: " y " }, { text: "más", href: "/shop/y" }, { text: "." }]);
+    expect(stripInline("Lee [la guía](/blog/x) hoy")).toBe("Lee la guía hoy");
+    expect(parseInline("sin enlaces")).toEqual([{ text: "sin enlaces" }]);
+  });
+  it("no convierte enlaces externos", () => {
+    expect(parseInline("[x](https://malo.com)")).toEqual([{ text: "[x](https://malo.com)" }]);
+  });
+});
+
+describe("Diario Azul: lote de tres artículos nuevos", () => {
+  const slugs = ["como-elegir-accesorios-look-tropical", "como-cuidar-anteojos-de-sol", "accesorios-inspirados-en-el-mar"];
+  it("están publicados, con portada válida y archivo existente", () => {
+    for (const slug of slugs) {
+      const p = getBlogPost(slug);
+      expect(p, slug).toBeDefined();
+      expect(validateBlogPost(p!), slug).toEqual([]);
+      expect(existsSync(join(process.cwd(), "public", p!.image.src)), slug).toBe(true);
+    }
+  });
+  it("cada uno tiene metadatos únicos y entre 900 y 1.300 palabras de lectura aproximada", () => {
+    const posts = slugs.map((slug) => getBlogPost(slug)!);
+    expect(new Set(posts.map((p) => p.metaTitle)).size).toBe(3);
+    expect(new Set(posts.map((p) => p.metaDescription)).size).toBe(3);
+    for (const p of posts) {
+      expect(p.metaDescription.length, p.slug).toBeLessThanOrEqual(165);
+      expect(readingMinutes(p), p.slug).toBeGreaterThanOrEqual(4);
+      expect(readingMinutes(p), p.slug).toBeLessThanOrEqual(7);
+    }
+  });
+  it("todos los productos que enlazan existen en la tienda", () => {
+    for (const p of ALL_BLOG_POSTS) {
+      for (const slug of productSlugsOf(p)) expect(CATALOG_SLUGS.has(slug), `${p.slug} → ${slug}`).toBe(true);
+      for (const href of inlineLinksOf(p)) {
+        const shop = /^\/shop\/([a-z0-9-]+)$/.exec(href)?.[1];
+        if (shop) expect(CATALOG_SLUGS.has(shop), `${p.slug} → ${href}`).toBe(true);
+      }
+    }
+  });
+  it("los enlaces entre artículos apuntan a artículos publicados", () => {
+    for (const p of ALL_BLOG_POSTS) {
+      for (const href of inlineLinksOf(p)) {
+        const target = /^\/blog\/([a-z0-9-]+)$/.exec(href)?.[1];
+        if (target) expect(getBlogPost(target), `${p.slug} → ${href}`).toBeDefined();
+      }
+    }
+  });
+  it("el artículo de cuidado enlaza al de cómo elegir anteojos y a productos de anteojos", () => {
+    const care = getBlogPost("como-cuidar-anteojos-de-sol")!;
+    expect(inlineLinksOf(care)).toContain("/blog/como-elegir-anteojos-de-sol");
+    expect(care.faq.some((f) => f.link?.href === "/blog/como-elegir-anteojos-de-sol")).toBe(true);
+    expect(productSlugsOf(care)).toEqual(["midnight-coast", "ocean-muse", "purple-tide", "sandy-glow", "sunset-tortoise"]);
+  });
+  it("no afirma protección UV ni certificaciones ni sostenibilidad", () => {
+    for (const slug of slugs) {
+      const text = JSON.stringify(getBlogPost(slug)).toLowerCase();
+      expect(text, slug).not.toMatch(/100 ?%|certificad|sostenible|biodegradable|reciclad|polarizad|antirreflej|uv400/);
+    }
+  });
+  it("el índice muestra primero los nuevos y el artículo de anteojos original sigue publicado", () => {
+    expect(BLOG_POSTS.map((p) => p.slug).slice(0, 3)).toEqual(slugs);
+    expect(getBlogPost("como-elegir-anteojos-de-sol")).toBeDefined();
   });
 });

@@ -8,7 +8,7 @@ import { Container } from "@/components/ui/Container";
 import { WaveDivider } from "@/components/ui/WaveDivider";
 import { routes } from "@/config/routes";
 import { siteConfig } from "@/config/site";
-import { getBlogPost } from "@/content/blog";
+import { BLOG_POSTS, getBlogPost } from "@/content/blog";
 import { getDb, isDatabaseConfigured } from "@/db";
 import { SLUG_PATTERN } from "@/domain/slug";
 import { buildBlogPostingJsonLd, buildBreadcrumbJsonLd, formatPostDate, productSlugsOf, readingMinutes, serializeJsonLd } from "@/domain/blog";
@@ -66,6 +66,8 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
   if (!post) notFound();
 
   const products = await loadProducts(productSlugsOf(post));
+  // Artículos relacionados: los otros publicados, el más reciente primero (máximo 2).
+  const related = BLOG_POSTS.filter((item) => item.slug !== post.slug).slice(0, 2);
   const path = routes.blogPost(post.slug);
   const minutes = readingMinutes(post);
   const jsonLd = [
@@ -142,6 +144,27 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
             ))}
           </div>
         </section>
+
+        {related.length > 0 && (
+          <section aria-labelledby="relacionados-titulo" className="mt-16">
+            <h2 id="relacionados-titulo" className="text-3xl font-bold sm:text-4xl">Sigue leyendo</h2>
+            <ul className="mt-6 grid gap-6 sm:grid-cols-2">
+              {related.map((item) => (
+                <li key={item.slug}>
+                  <article className="group relative flex h-full flex-col overflow-hidden rounded-3xl border border-celeste bg-paper transition-shadow hover:shadow-soft">
+                    <PostCover post={item} sizes="(min-width: 768px) 372px, 100vw" imageClassName="transition-transform duration-300 motion-safe:group-hover:scale-[1.03]" />
+                    <div className="flex flex-1 flex-col gap-2 p-5">
+                      <p className="font-display text-xs font-bold uppercase tracking-[0.14em] text-navy/60">{item.category}</p>
+                      <h3 className="font-display text-xl font-bold leading-snug text-navy">
+                        <Link href={routes.blogPost(item.slug)} className="after:absolute after:inset-0 hover:underline">{item.title}</Link>
+                      </h3>
+                    </div>
+                  </article>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <p className="mt-12">
           <Link href={routes.blog} className="font-semibold text-navy underline underline-offset-4">← Volver a Diario Azul</Link>
