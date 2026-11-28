@@ -142,7 +142,7 @@ const CATALOG_SLUGS = new Set([
   "set-de-portavasos-mosaico-marino", "sandy-glow", "purple-tide", "midnight-coast", "ocean-muse", "sunset-tortoise", "little-glow-friends-set-of-3",
   "portavasos-tortuguita", "bamboo-tootbrush", "camiseta-azul-clarito", "collar-ocean-star", "porta-vasos-memorias-de-mar", "mermaids-bracelet",
   "crop-top-mermaids", "gorra-azul-clarito-whale", "camiseta-tortuga", "un-pedacito-de-mar", "mi-littl-chickn-cougar-cronics", "the-brief-chapter-of-you",
-  "eme-ama-s", "romanticismo-cuantico", "tattoo-tropical", "imanes-tropicales",
+  "eme-ama-s", "romanticismo-cuantico", "tattoo-tropical", "imanes-tropicales", "aretes-monstera-deliciosa",
 ]);
 
 describe("enlaces internos en el texto", () => {
@@ -206,7 +206,41 @@ describe("Diario Azul: lote de tres artículos nuevos", () => {
     }
   });
   it("el índice muestra primero los nuevos y el artículo de anteojos original sigue publicado", () => {
-    expect(BLOG_POSTS.map((p) => p.slug).slice(0, 3)).toEqual(slugs);
+    const order = BLOG_POSTS.map((p) => p.slug);
+    for (const slug of slugs) expect(order, slug).toContain(slug);
     expect(getBlogPost("como-elegir-anteojos-de-sol")).toBeDefined();
+  });
+});
+
+const BATCH2 = [
+  "que-llevar-a-la-playa", "puerto-viejo-costa-rica-guia", "estilo-caribeno-colores-texturas", "como-elegir-una-gorra",
+  "jabones-artesanales-como-elegir", "regalos-originales-inspirados-en-el-caribe", "historia-de-azul-clarito",
+];
+
+describe("lotes 2 y 3 del blog", () => {
+  it("los siete artículos están publicados y son válidos", () => {
+    for (const slug of BATCH2) {
+      const post = getBlogPost(slug);
+      expect(post, slug).toBeDefined();
+      expect(validateBlogPost(post!), slug).toEqual([]);
+    }
+  });
+  it("no repiten meta title, meta description ni portada entre sí", () => {
+    const posts = BLOG_POSTS;
+    expect(new Set(posts.map((p) => p.metaTitle)).size).toBe(posts.length);
+    expect(new Set(posts.map((p) => p.metaDescription)).size).toBe(posts.length);
+    expect(new Set(posts.map((p) => p.image.src)).size).toBe(posts.length);
+  });
+  it("no usan afirmaciones prohibidas (protección, certificaciones, hipoalergénico, etc.)", () => {
+    for (const slug of BATCH2) {
+      const text = JSON.stringify(getBlogPost(slug)).toLowerCase();
+      expect(text, slug).not.toMatch(/100 ?%|certificad|sostenible|biodegradable|reciclad|polarizad|antirreflej|uv400|hipoalerg|dermatol|terap[eé]utic/);
+    }
+  });
+  it("el de jabones no enlaza a productos (la tienda no tiene jabones)", () => {
+    expect(productSlugsOf(getBlogPost("jabones-artesanales-como-elegir")!)).toEqual([]);
+  });
+  it("el de gorras incluye la Tutty Gorra", () => {
+    expect(productSlugsOf(getBlogPost("como-elegir-una-gorra")!)).toContain("tutty-gorra");
   });
 });
