@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { TrackPurchase } from "@/components/analytics/TrackEvents";
 import { ResultAction } from "@/components/checkout/ResultActions";
 import { Container } from "@/components/ui/Container";
 import { Notice } from "@/components/ui/Notice";
 import { routes } from "@/config/routes";
 import { siteConfig } from "@/config/site";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { buildPurchasePayload, isPurchaseTrackable } from "@/domain/analytics";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { loadCheckoutResult } from "@/server/services/checkout/result";
 
@@ -42,9 +44,16 @@ export default async function CheckoutResultPage({ searchParams }: { searchParam
     cancelled: "Este pedido fue cancelado",
   }[view];
 
+  // MEDICIÓN: la compra se mide SOLO si el servidor confirmó el pago (estado "paid" leído de la base, con `paid_at` de la verificación a
+  // Tilopay) y es reciente. Pendiente, fallido o cancelado: nada. Los datos salen del pedido guardado, nunca de la URL.
+  const purchase = isPurchaseTrackable({ view, paidAt: result.paidAt, now: new Date() })
+    ? buildPurchasePayload({ orderNumber: result.orderNumber, currency: result.currency, subtotal: result.subtotal, taxTotal: result.taxTotal, shippingTotal: result.shippingTotal, items: result.trackingItems.map((i) => ({ sku: i.sku, name: i.name, unitPrice: i.unitPrice, quantity: i.quantity, variant: i.variant, category: i.category })) })
+    : null;
+
   return (
     <section className="bg-gradient-to-b from-celeste/40 to-paper py-12 sm:py-16">
       <Container size="narrow">
+        {purchase && <TrackPurchase payload={purchase} />}
         <p className="font-display text-sm font-bold uppercase tracking-wide text-navy/70">Pedido {result.orderNumber}</p>
         <h1 className="mt-2 text-4xl font-bold">{heading}</h1>
 

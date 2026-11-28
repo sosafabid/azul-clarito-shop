@@ -35,6 +35,7 @@ export const routes = {
   adminInventory: "/admin/inventory",
   adminTaxes: "/admin/taxes",
   adminShipping: "/admin/shipping",
+  adminReports: "/admin/reportes",
   adminCustomers: "/admin/customers",
   adminUsers: "/admin/users",
   adminUser: (id: string) => `/admin/users/${encodeURIComponent(id)}`,

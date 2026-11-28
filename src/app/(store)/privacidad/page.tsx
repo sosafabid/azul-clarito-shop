@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CookiePreferencesButton } from "@/components/analytics/CookiePreferencesButton";
 import { LegalDocument } from "@/components/account/LegalDocument";
 import { legalConfig } from "@/config/legal";
 import { siteConfig } from "@/config/site";
@@ -34,7 +35,7 @@ export default function PrivacyPage() {
           <strong>Del consentimiento:</strong> qué se aceptó o retiró, la versión del texto y la fecha.
         </li>
         <li>
-          <strong>Técnicos mínimos:</strong> una cookie de sesión necesaria para mantener el ingreso. No usamos cookies publicitarias.
+          <strong>Técnicos mínimos:</strong> cookies necesarias para mantener el ingreso, el carrito y recordar tu elección sobre cookies. Las cookies de medición y de publicidad solo se activan si las aceptás (ver sección 10).
         </li>
         <li>
           <strong>Cuando se habiliten las compras:</strong> direcciones de entrega y el historial de pedidos.
@@ -89,6 +90,24 @@ export default function PrivacyPage() {
 
       <h2>9. Cambios en esta política</h2>
       <p>Cada versión de esta política tiene fecha y cada aceptación queda registrada con la versión vista. Si hay cambios importantes, se pedirá una nueva autorización.</p>
+
+      <h2>10. Cookies y herramientas de medición</h2>
+      <p>Usamos tres tipos de cookies. Las opcionales empiezan apagadas y solo se activan si las aceptás en el aviso de cookies.</p>
+      <ul>
+        <li>
+          <strong>Necesarias (siempre activas):</strong> la sesión de ingreso, el carrito de quien compra sin cuenta, el proceso de pago y la cookie que recuerda tu elección sobre cookies (dura 180 días). Sin ellas la tienda no funciona.
+        </li>
+        <li>
+          <strong>Medición (opcional):</strong> Google Analytics 4, para saber qué páginas y productos se ven, qué se agrega al carrito, cuántas personas inician una compra y cuántas la completan. Enviamos el producto, el monto y el número de pedido; <strong>no enviamos nombre, correo, teléfono, dirección ni datos de pago</strong>. Las señales de Google y la personalización de anuncios están desactivadas.
+        </li>
+        <li>
+          <strong>Publicidad (opcional):</strong> Meta Pixel, para medir el resultado de anuncios en Facebook e Instagram, con los mismos límites de datos. Solo se usa cuando esté activado en la tienda y lo aceptes.
+        </li>
+      </ul>
+      <p>
+        Mientras no aceptes, no se carga ningún script de Google ni de Meta. Estos proveedores pueden tratar datos en servidores fuera de Costa Rica. Podés cambiar o retirar tu permiso cuando quieras:{" "}
+        <CookiePreferencesButton className="font-semibold text-navy underline underline-offset-4">Preferencias de cookies</CookiePreferencesButton>.
+      </p>
     </LegalDocument>
   );
 }

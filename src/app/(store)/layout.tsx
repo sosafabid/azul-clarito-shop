@@ -1,3 +1,4 @@
+import { AnalyticsProvider } from "@/components/analytics/AnalyticsProvider";
 import { SiteFooter } from "@/components/layout/SiteFooter";
 import { SiteHeader } from "@/components/layout/SiteHeader";
 
@@ -16,6 +17,7 @@ export default function StoreLayout({ children }: { children: React.ReactNode })
         {children}
       </main>
       <SiteFooter />
+      <AnalyticsProvider />
     </>
   );
 }

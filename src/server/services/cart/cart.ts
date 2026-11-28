@@ -268,6 +268,7 @@ export async function getCartView(db: Database, owner: CartOwner): Promise<CartV
       variantId: row.variantId,
       slug: row.slug,
       sku: row.variantSku ?? row.productSku,
+      productSku: row.productSku,
       name: row.name,
       variantLabel: label,
       imageUrl: row.imageUrl,

@@ -17,7 +17,7 @@ import type { CartMutation } from "@/server/services/cart/types";
  *  - Cada acción sobre una línea comprueba que la línea sea del carrito de quien la pide.
  *  - Agregar al carrito NO reserva stock.
  */
-export type CartActionState = { ok: boolean; message: string; code?: string; quantity?: number } | null;
+export type CartActionState = { ok: boolean; message: string; code?: string; quantity?: number; /** Se agregó menos de lo pedido por falta de stock o tope por línea. */ limited?: boolean } | null;
 
 const NO_DB: CartActionState = { ok: false, message: "La tienda no está disponible por ahora. Intentá de nuevo más tarde." };
 
@@ -25,7 +25,7 @@ function toState(result: CartMutation): CartActionState {
   // Refresca el header (contador) y la página actual con los datos nuevos.
   revalidatePath("/", "layout");
   return result.ok
-    ? { ok: true, message: result.message, quantity: result.quantity }
+    ? { ok: true, message: result.message, quantity: result.quantity, limited: result.limited }
     : { ok: false, message: result.message, code: result.code };
 }
 

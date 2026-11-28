@@ -19,6 +19,8 @@ export type CartLineView = {
   variantId: string | null;
   slug: string;
   sku: string;
+  /** SKU del PRODUCTO (no de la variante): id estable para la medición del embudo. */
+  productSku: string;
   name: string;
   variantLabel: string | null;
   imageUrl: string | null;

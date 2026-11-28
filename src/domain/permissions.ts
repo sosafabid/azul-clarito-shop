@@ -46,6 +46,9 @@ export const PERMISSIONS = {
   "settings:write": ["SUPER_ADMIN"],
   "integrations:manage": ["SUPER_ADMIN"],
 
+  // ── Reportes comerciales (ventas e ingresos reales) ──
+  "reports:read": ["SUPER_ADMIN"],
+
   // ── Auditoría ──
   "audit:read": ["SUPER_ADMIN"],
 } as const satisfies Record<string, readonly UserRole[]>;

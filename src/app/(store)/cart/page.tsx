@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { TrackViewCart } from "@/components/analytics/TrackEvents";
 import { CartLineControls } from "@/components/cart/CartLineControls";
 import { ProductImage } from "@/components/shop/ProductImage";
 import { CartIcon } from "@/components/ui/icons";
 import { Container } from "@/components/ui/Container";
 import { Notice } from "@/components/ui/Notice";
 import { routes } from "@/config/routes";
+import { analyticsItem } from "@/domain/analytics";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { cn } from "@/lib/utils";
 import { getCartViewForRequest } from "@/server/services/cart/request";
@@ -39,10 +41,12 @@ export default async function CartPage() {
   if (!cart || cart.lines.length === 0) return <EmptyCart />;
 
   const currency = toCurrency(cart.currency ?? "CRC");
+  const trackedItems = cart.lines.filter((line) => line.status === "ok").map((line) => analyticsItem({ sku: line.productSku, name: line.name, unitPrice: line.unitPrice, currency: line.currency, quantity: line.quantity, variant: line.variantLabel }));
 
   return (
     <section className="bg-paper py-10 sm:py-14">
       <Container>
+        {trackedItems.length > 0 && <TrackViewCart items={trackedItems} currency={currency} />}
         <h1 className="text-4xl font-bold sm:text-5xl">Tu carrito</h1>
         <p className="mt-2 text-ink/70">
           {cart.totalUnits} {cart.totalUnits === 1 ? "unidad" : "unidades"}

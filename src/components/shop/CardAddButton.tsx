@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
 import { routes } from "@/config/routes";
+import { itemsValue, type AnalyticsItem } from "@/domain/analytics";
+import { trackEvent } from "@/lib/analytics/track";
 import { safeCartAction } from "@/components/cart/safe-action";
 import { addToCartAction } from "@/server/actions/cart";
 
@@ -17,8 +19,12 @@ const button =
  *  - producto con variantes → lleva a la ficha para elegir la opción (no se puede agregar a medias);
  *  - agotado → deshabilitado.
  */
-export function CardAddButton({ productId, slug, hasVariants, soldOut }: { productId: string; slug: string; hasVariants: boolean; soldOut: boolean }) {
+export function CardAddButton({ productId, slug, hasVariants, soldOut, item, currency }: { productId: string; slug: string; hasVariants: boolean; soldOut: boolean; item: AnalyticsItem; currency: string }) {
   const [state, formAction, pending] = useActionState(safeAdd, null);
+  // Medición: solo cuando el servidor confirma que se agregó 1 unidad completa (`add_to_cart`).
+  useEffect(() => {
+    if (state?.ok && !state.limited) trackEvent("add_to_cart", { currency, value: itemsValue([{ ...item, quantity: 1 }], currency), items: [{ ...item, quantity: 1 }] });
+  }, [state, item, currency]);
 
   if (soldOut) {
     return (

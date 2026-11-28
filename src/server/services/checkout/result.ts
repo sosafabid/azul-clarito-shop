@@ -1,8 +1,9 @@
 import "server-only";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { variantLabel } from "@/domain/cart";
 import { isPickupSnapshot } from "@/domain/checkout";
 import type { Database } from "@/db/client";
-import { orderItems, orderNotifications, orders, paymentEvents, payments } from "@/db/schema";
+import { categories, orderItems, orderNotifications, orders, paymentEvents, payments, products } from "@/db/schema";
 import { digitalItemsForPage, isOrderPaid } from "@/server/services/digital/delivery";
 import { findPaymentByToken } from "@/server/services/payments/session";
 import { countryName } from "@/domain/shipping";
@@ -23,6 +24,10 @@ export type CheckoutResult = {
   total: number;
   destination: string;
   items: { name: string; quantity: number; lineTotal: number }[];
+  /** Cuándo el servidor confirmó el pago (verificación con Tilopay). Null = aún no confirmado. Base de la medición de la compra. */
+  paidAt: Date | null;
+  /** Productos del pedido con los datos que necesita la medición (sin nada personal). */
+  trackingItems: { sku: string; name: string; unitPrice: number; quantity: number; variant: string | null; category: string | null }[];
   view: CheckoutResultView;
   /** La página de pago nunca llegó a abrirse (error al crearla). */
   sessionProblem: boolean;
@@ -44,6 +49,22 @@ export async function loadCheckoutResult(db: Database, token: string): Promise<C
   const [order] = await db.select().from(orders).where(eq(orders.id, found.orderId)).limit(1);
   if (!order) return null;
   const items = await db.select({ name: orderItems.nameSnapshot, quantity: orderItems.quantity, lineTotal: orderItems.lineTotal }).from(orderItems).where(eq(orderItems.orderId, order.id)).orderBy(asc(orderItems.createdAt));
+  const detail = await db
+    .select({
+      name: orderItems.nameSnapshot,
+      skuSnapshot: orderItems.skuSnapshot,
+      productSku: products.sku,
+      options: orderItems.variantOptionsSnapshot,
+      variantId: orderItems.variantId,
+      unitPrice: orderItems.unitPriceSnapshot,
+      quantity: orderItems.quantity,
+      category: categories.name,
+    })
+    .from(orderItems)
+    .leftJoin(products, eq(products.id, orderItems.productId))
+    .leftJoin(categories, eq(categories.id, products.categoryId))
+    .where(eq(orderItems.orderId, order.id))
+    .orderBy(asc(orderItems.createdAt));
   const [latest] = await db.select().from(payments).where(eq(payments.orderId, order.id)).orderBy(desc(payments.attempt)).limit(1);
 
   const [lastSession] = latest
@@ -69,6 +90,8 @@ export async function loadCheckoutResult(db: Database, token: string): Promise<C
     total: order.total,
     destination: [address.district, address.city, address.stateProvince, address.countryCode && address.countryCode !== "CR" ? countryName(address.countryCode) : null].filter(Boolean).join(", "),
     items,
+    paidAt: order.paidAt ?? null,
+    trackingItems: detail.map((row) => ({ sku: row.productSku ?? row.skuSnapshot, name: row.name, unitPrice: row.unitPrice, quantity: row.quantity, variant: row.variantId && row.options ? variantLabel({ name: null, options: row.options }) : null, category: row.category })),
     view,
     chargedWhileCancelled: view === "cancelled" && order.paymentReviewReason !== null,
     sessionProblem: latest?.status === "PENDING" && lastSession?.type === "session_failed",

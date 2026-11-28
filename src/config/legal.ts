@@ -20,7 +20,7 @@ export const legalConfig = {
    */
   reviewed: false as boolean,
   termsVersion: "2026-10-05",
-  privacyVersion: "2026-10-05",
+  privacyVersion: "2026-11-27",
   controller: {
     /** Nombre o razón social del responsable de la base de datos. */
     name: null as string | null,

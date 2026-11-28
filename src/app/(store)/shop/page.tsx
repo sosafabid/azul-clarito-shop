@@ -1,16 +1,24 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { TrackViewItemList } from "@/components/analytics/TrackEvents";
 import { CatalogFilters } from "@/components/shop/CatalogFilters";
 import { ProductCard } from "@/components/shop/ProductCard";
 import { ComingSoon } from "@/components/ui/ComingSoon";
 import { Container } from "@/components/ui/Container";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { analyticsItem } from "@/domain/analytics";
 import { parseCatalogSelection } from "@/domain/catalog-filters";
 import { getCatalogFacets } from "@/server/services/catalog/facets";
 import { listPublicProducts } from "@/server/services/catalog/queries";
 
-export const metadata: Metadata = { title: "Tienda" };
+export const metadata: Metadata = {
+  title: "Tienda",
+  description: "Accesorios, ropa, cuadernos, libros y piezas inspiradas en el mar y el Caribe, creadas desde Limón, Costa Rica.",
+  // Las combinaciones de filtros (?categoria=…) son vistas del mismo catálogo: apuntan a esta página como la principal.
+  alternates: { canonical: routes.shop },
+  openGraph: { type: "website", url: routes.shop, title: "Tienda · Azul Clarito Shop", description: "Accesorios, ropa, cuadernos, libros y piezas inspiradas en el mar y el Caribe, creadas desde Limón, Costa Rica." },
+};
 
 // Los datos salen de la base de datos en cada visita (aún sin caché).
 export const dynamic = "force-dynamic";
@@ -20,6 +28,8 @@ export default async function ShopPage({ searchParams }: { searchParams: Promise
   const db = isDatabaseConfigured() ? getDb() : null;
   const [catalog, facets] = db ? await Promise.all([listPublicProducts(db, { categorySlug: selection.category, collectionSlug: selection.collection }), getCatalogFacets(db, selection)]) : [[], null];
   const filtering = Boolean(selection.category || selection.collection);
+  const list = { id: filtering ? `tienda-${selection.collection ?? ""}-${selection.category ?? ""}` : "tienda", name: filtering ? "Tienda (filtrada)" : "Tienda" };
+  const listItems = catalog.map((product, index) => analyticsItem({ sku: product.sku, name: product.name, unitPrice: product.price, currency: product.currency, category: product.categoryName, listName: list.name, index }));
 
   if (catalog.length === 0 && !filtering) {
     return (
@@ -57,11 +67,14 @@ export default async function ShopPage({ searchParams }: { searchParams: Promise
             </Link>
           </p>
         ) : (
-          <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {catalog.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </ul>
+          <>
+            <TrackViewItemList key={list.id} items={listItems} listId={list.id} listName={list.name} currency={catalog[0].currency} />
+            <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {catalog.map((product, index) => (
+                <ProductCard key={product.id} product={product} list={list} index={index} />
+              ))}
+            </ul>
+          </>
         )}
       </Container>
     </section>

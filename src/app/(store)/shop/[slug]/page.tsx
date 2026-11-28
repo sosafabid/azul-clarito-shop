@@ -3,6 +3,7 @@ import { INTERNATIONAL_COLLECTION_SLUG } from "@/domain/shipping";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
+import { TrackViewItem } from "@/components/analytics/TrackEvents";
 import { AddToCartForm } from "@/components/shop/AddToCartForm";
 import { AvailabilityBadge } from "@/components/shop/AvailabilityBadge";
 import { ProductGallery } from "@/components/shop/ProductGallery";
@@ -10,10 +11,14 @@ import { ComingSoon } from "@/components/ui/ComingSoon";
 import { Container } from "@/components/ui/Container";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { analyticsItem } from "@/domain/analytics";
 import { variantLabel } from "@/domain/cart";
 import { sizeValueOf } from "@/domain/sizes";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { SLUG_PATTERN } from "@/domain/slug";
+import { buildProductJsonLd, productMetaDescription } from "@/domain/product-seo";
+import { serializeJsonLd, buildBreadcrumbJsonLd } from "@/domain/blog";
+import { siteConfig } from "@/config/site";
 import { getPublicProductBySlug } from "@/server/services/catalog/queries";
 
 // Los datos salen de la base de datos en cada visita (aún sin caché).
@@ -28,7 +33,16 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!SLUG_PATTERN.test(slug) || !isDatabaseConfigured()) return { ...base, title: "Producto" };
   const product = await loadProduct(slug);
   if (!product) return { ...base, title: "Producto" };
-  return { ...base, title: product.name, description: product.shortDescription ?? undefined };
+  const description = productMetaDescription(product);
+  const image = product.imageUrl ?? product.images[0]?.url;
+  return {
+    ...base,
+    title: product.name,
+    description,
+    alternates: { canonical: routes.product(product.slug) },
+    openGraph: { type: "website", url: routes.product(product.slug), title: `${product.name} · ${siteConfig.name}`, description, ...(image ? { images: [{ url: image, alt: product.imageAlt ?? product.name }] } : {}) },
+    twitter: { card: image ? "summary_large_image" : "summary", title: product.name, description, ...(image ? { images: [image] } : {}) },
+  };
 }
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
@@ -55,9 +69,22 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
     ...product.images.filter((image) => image.url !== product.imageUrl).map((image) => ({ id: image.id, url: image.url, alt: image.alt ?? product.name })),
   ];
   const soldOut = product.availability === "out_of_stock";
+  const viewItem = analyticsItem({ sku: product.sku, name: product.name, unitPrice: product.price, currency: product.currency, category: product.categoryName });
+
+  const seoProduct = {
+    slug: product.slug, sku: product.sku, name: product.name, shortDescription: product.shortDescription, description: product.description, price: product.price, currency: product.currency,
+    availability: product.availability, categoryName: product.categoryName, images: galleryImages.map((image) => ({ url: image.url, alt: image.alt })), variants: product.variants.map((variant) => ({ price: variant.price })),
+  };
+  const jsonLd = [
+    buildProductJsonLd(seoProduct, { baseUrl: siteConfig.url }),
+    buildBreadcrumbJsonLd([{ name: "Inicio", path: "/" }, { name: "Tienda", path: routes.shop }, { name: product.name, path: routes.product(product.slug) }], siteConfig.url),
+  ];
 
   return (
     <section className="bg-paper py-10 sm:py-16">
+      {jsonLd.map((data, index) => (
+        <script key={index} type="application/ld+json" dangerouslySetInnerHTML={{ __html: serializeJsonLd(data) }} />
+      ))}
       <Container>
         <Link href={routes.shop} className="text-sm font-semibold text-navy underline underline-offset-4">
           ← Volver a la tienda
@@ -79,9 +106,18 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             {product.shortDescription && <p className="mt-6 text-lg leading-relaxed text-ink">{product.shortDescription}</p>}
             {product.description && <p className="mt-4 whitespace-pre-line leading-relaxed text-ink/80">{product.description}</p>}
 
+            <TrackViewItem item={viewItem} currency={product.currency} />
             <AddToCartForm
               productId={product.id}
               soldOut={soldOut}
+              tracking={{
+                sku: product.sku,
+                name: product.name,
+                category: product.categoryName,
+                currency: product.currency,
+                price: product.price,
+                variants: Object.fromEntries(product.variants.map((variant) => [variant.id, { price: variant.price ?? product.price, label: variantLabel(variant) }])),
+              }}
               options={product.variants.map((variant) => ({
                 id: variant.id,
                 label: variantLabel(variant),

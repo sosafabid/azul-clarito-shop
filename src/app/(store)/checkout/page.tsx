@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { TrackAddShippingInfo, TrackBeginCheckout } from "@/components/analytics/TrackEvents";
 import { CheckoutForm, PendingOrderPanel } from "@/components/checkout/CheckoutForm";
 import { CountrySelect } from "@/components/checkout/CountrySelect";
 import { ProductImage } from "@/components/shop/ProductImage";
@@ -8,6 +9,7 @@ import { Container } from "@/components/ui/Container";
 import { Notice } from "@/components/ui/Notice";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { analyticsItem, shortSignature } from "@/domain/analytics";
 import { formatMoney, toCurrency } from "@/domain/money";
 import { COUNTRY_ONLY_MESSAGE, CR_PROVINCES, STORE_COUNTRY, countryName, parseDestination } from "@/domain/shipping";
 import { formatBps } from "@/domain/tax";
@@ -86,9 +88,17 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const intlHref = `${routes.checkout}?entrega=internacional`;
   const intlChosen = intlMode && !pickupChosen;
 
+  // Medición del embudo (solo productos y montos; sin datos personales). Con bloqueos en el carrito no se cuenta el inicio de compra.
+  const trackedItems = cart.lines.filter((line) => line.status === "ok").map((line) => analyticsItem({ sku: line.productSku, name: line.name, unitPrice: line.unitPrice, currency: line.currency, quantity: line.quantity, variant: line.variantLabel }));
+  const cartSignature = shortSignature(cart.lines.map((line) => `${line.productId}:${line.variantId ?? ""}:${line.quantity}`).join("|"));
+  const shippingTier = pickupChosen ? (shipping.selected?.name ?? "Retiro en persona") : (method?.name ?? "Envío");
+  const shippingResolved = shipping.required && !digitalOnly && totals.blockers.length === 0 && (pickupChosen || (shipping.state === "selected" && !countryProblem && !restricted));
+
   return (
     <section className="bg-paper py-10 sm:py-14">
       <Container>
+        {totals.blockers.length === 0 && trackedItems.length > 0 && <TrackBeginCheckout items={trackedItems} currency={currency} signature={cartSignature} />}
+        {shippingResolved && trackedItems.length > 0 && <TrackAddShippingInfo items={trackedItems} currency={currency} tier={shippingTier} signature={shortSignature(`${cartSignature}|${shippingTier}|${country}`)} />}
         <Link href={routes.cart} className="text-sm font-semibold text-navy underline underline-offset-4">← Volver al carrito</Link>
         <h1 className="mt-4 text-4xl font-bold sm:text-5xl">Finalizar compra</h1>
 

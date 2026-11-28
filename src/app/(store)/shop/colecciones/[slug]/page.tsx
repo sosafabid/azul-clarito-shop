@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { TrackViewItemList } from "@/components/analytics/TrackEvents";
 import { CatalogFilters } from "@/components/shop/CatalogFilters";
 import { ProductCard } from "@/components/shop/ProductCard";
 import { Container } from "@/components/ui/Container";
 import { routes } from "@/config/routes";
 import { getDb, isDatabaseConfigured } from "@/db";
+import { analyticsItem } from "@/domain/analytics";
 import { parseCatalogSelection } from "@/domain/catalog-filters";
 import { SLUG_PATTERN } from "@/domain/slug";
 import { getCatalogFacets, getPublicCollection } from "@/server/services/catalog/facets";
@@ -26,6 +28,8 @@ export default async function CollectionPage({ params, searchParams }: { params:
   const selection = { category: parseCatalogSelection(await searchParams).category, collection: slug };
   const [catalog, facets] = await Promise.all([listPublicProducts(db, { categorySlug: selection.category, collectionSlug: slug }), getCatalogFacets(db, selection)]);
   const base = routes.shopCollection(slug);
+  const list = { id: `coleccion-${slug}`, name: `Colección: ${collection.name}` };
+  const listItems = catalog.map((product, index) => analyticsItem({ sku: product.sku, name: product.name, unitPrice: product.price, currency: product.currency, category: product.categoryName, listName: list.name, index }));
 
   return (
     <section className="bg-paper py-14 sm:py-20">
@@ -49,11 +53,14 @@ export default async function CollectionPage({ params, searchParams }: { params:
             </Link>
           </p>
         ) : (
-          <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {catalog.map((product) => (
-              <ProductCard key={product.id} product={product} />
-            ))}
-          </ul>
+          <>
+            <TrackViewItemList key={`${list.id}-${selection.category ?? ""}`} items={listItems} listId={list.id} listName={list.name} currency={catalog[0].currency} />
+            <ul className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {catalog.map((product, index) => (
+                <ProductCard key={product.id} product={product} list={list} index={index} />
+              ))}
+            </ul>
+          </>
         )}
       </Container>
     </section>

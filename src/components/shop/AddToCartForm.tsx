@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { routes } from "@/config/routes";
+import { analyticsItem, itemsValue } from "@/domain/analytics";
 import { MAX_QUANTITY_PER_LINE } from "@/domain/cart";
 import { compareSizes } from "@/domain/sizes";
 import { cn } from "@/lib/utils";
 import { safeCartAction } from "@/components/cart/safe-action";
+import { trackEvent } from "@/lib/analytics/track";
 import { addToCartAction } from "@/server/actions/cart";
 
 const safeAdd = safeCartAction(addToCartAction);
@@ -21,8 +23,20 @@ export type VariantOption = { id: string; label: string; priceLabel: string | nu
  *  - Solo se envían ids y cantidad: el precio lo decide el servidor.
  *  - Mientras se agrega, el botón queda bloqueado (evita agregar dos veces con un doble clic).
  */
-export function AddToCartForm({ productId, options, soldOut }: { productId: string; options: VariantOption[]; soldOut: boolean }) {
+/** Datos para medir `add_to_cart` (precios en unidad mínima, los mismos que muestra la ficha; el servidor igual decide el cobro). */
+export type AddToCartTracking = { sku: string; name: string; category: string | null; currency: string; price: number; variants: Record<string, { price: number; label: string }> };
+
+export function AddToCartForm({ productId, options, soldOut, tracking }: { productId: string; options: VariantOption[]; soldOut: boolean; tracking?: AddToCartTracking }) {
   const [state, formAction, pending] = useActionState(safeAdd, null);
+  // Lo que se pidió en el momento de enviar (para medir lo agregado aunque la persona cambie la elección después).
+  const submitted = useRef<{ variantId: string; quantity: number } | null>(null);
+  useEffect(() => {
+    if (!tracking || !state?.ok || state.limited || !submitted.current) return;
+    const { variantId: sentVariant, quantity: sentQuantity } = submitted.current;
+    const variant = sentVariant ? tracking.variants[sentVariant] : undefined;
+    const item = analyticsItem({ sku: tracking.sku, name: tracking.name, unitPrice: variant?.price ?? tracking.price, currency: tracking.currency, quantity: sentQuantity, category: tracking.category, variant: variant?.label });
+    trackEvent("add_to_cart", { currency: tracking.currency, value: itemsValue([item], tracking.currency), items: [item] });
+  }, [state, tracking]);
   const [variantId, setVariantId] = useState("");
   const [quantity, setQuantity] = useState(1);
   // El aviso se oculta al cambiar la elección; un resultado nuevo (objeto nuevo) lo vuelve a mostrar.
@@ -39,7 +53,14 @@ export function AddToCartForm({ productId, options, soldOut }: { productId: stri
   const clamp = (value: number) => Math.min(MAX_QUANTITY_PER_LINE, Math.max(1, Number.isFinite(value) ? Math.trunc(value) : 1));
 
   return (
-    <form action={formAction} className="mt-8 space-y-5" noValidate>
+    <form
+      action={(formData: FormData) => {
+        submitted.current = { variantId, quantity };
+        formAction(formData);
+      }}
+      className="mt-8 space-y-5"
+      noValidate
+    >
       <input type="hidden" name="productId" value={productId} />
 
       {sizeMode && (

@@ -21,4 +21,5 @@ export const adminNav: readonly AdminNavItem[] = [
   { label: "Usuarios y roles", href: routes.adminUsers, permission: "users:read" },
   { label: "Impuestos", href: routes.adminTaxes, permission: "settings:read" },
   { label: "Envíos", href: routes.adminShipping, permission: "settings:read" },
+  { label: "Reportes", href: routes.adminReports, permission: "reports:read" },
 ];
